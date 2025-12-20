@@ -1,0 +1,30 @@
+<!-- res/layout/prayer_button.xml -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="8dp"
+    android:background="?attr/selectableItemBackground"
+    android:clickable="true"
+    android:focusable="true"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <!-- Line 1: Prayer name -->
+    <TextView
+        android:id="@+id/prayerName"
+        android:text="Fajr"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content" />
+
+    <!-- Line 2: Speaker icon (only visible during playback) -->
+    <ImageView
+        android:id="@+id/speakerIcon"
+        android:src="@android:drawable/ic_media_play"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:layout_marginTop="4dp"
+        android:visibility="gone" />
+</LinearLayout>

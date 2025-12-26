@@ -10,12 +10,16 @@ android {
         version = release(36)
     }
 
+    buildFeatures {
+        viewBinding = true
+    }
+
     defaultConfig {
         applicationId = "com.abang.prayertimecompare"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
-        versionName = "1.88"
+        versionName = "1.90"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

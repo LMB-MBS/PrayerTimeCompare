@@ -82,8 +82,6 @@ import androidx.core.content.ContextCompat
 import com.abang.prayertimecompare.databinding.ActivityMainBinding
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import kotlin.apply
-import kotlin.or
-import kotlin.text.compareTo
 
 
 // -------------------------------
@@ -624,26 +622,15 @@ class MainActivity : Activity() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                "prayer_channel",
+                "Prayer Notifications",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply { description = "Channel for prayer time azan playback" }
 
-        val channel = NotificationChannel(
-            "prayer_channel",
-            "Prayer Notifications",
-            NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            description = "Azan playback alerts"
-
-            // Keep notification sound controlled by MediaPlayer (optional)
-            setSound(null, null)
-
-            enableVibration(true)
-            enableLights(true)
-            lightColor = Colors.ORANGE
-            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
-
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(channel)
     }
 
 
@@ -3262,6 +3249,7 @@ class MainActivity : Activity() {
             }
         }
 
+
         // This function was removed in your code, re-add it.
         private fun broadcastPlaybackState(action: String, prayer: String) {
             val intent = Intent(action).apply {
@@ -3272,27 +3260,12 @@ class MainActivity : Activity() {
         }
 
         private fun createNotification(prayer: String): Notification {
-            val stopIntent = Intent(this, MainActivity.PrayerNotificationService::class.java).apply {
+            val stopIntent = Intent(this, PrayerNotificationService::class.java).apply {
                 action = "STOP_AZAN"
                 putExtra("prayer", prayer)
             }
             val stopPendingIntent = PendingIntent.getService(
-                this,
-                1,
-                stopIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            // Heads-up reliability: fullScreenIntent (alarm-style peek)
-            val fsIntent = Intent(this, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                putExtra("from_azan", true)
-                putExtra("prayer", prayer)
-            }
-            val fsPendingIntent = PendingIntent.getActivity(
-                this,
-                2,
-                fsIntent,
+                this, 0, stopIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
@@ -3301,20 +3274,7 @@ class MainActivity : Activity() {
                 .setContentText("Playing now")
                 .setSmallIcon(R.drawable.ic_speaker_on)
                 .addAction(R.drawable.ic_stop, "Stop", stopPendingIntent)
-
-                // Foreground persistence during playback
                 .setOngoing(true)
-                .setAutoCancel(false)
-
-                // Heads-up knobs (pre-O uses priority; O+ uses channel importance)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setCategory(NotificationCompat.CATEGORY_ALARM)
-
-                // Robust: forces heads-up style presentation on many OEMs
-                .setFullScreenIntent(fsPendingIntent, true)
-
-                // Optional: reduce “silent collapse” behavior
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .build()
         }
 

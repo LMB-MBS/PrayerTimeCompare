@@ -1,3 +1,6 @@
+// working version_01 PTC 26_12/25
+// if click anyware dialog disappear. wrong behaviour. dialog should remain untill dismissed properly
+// through Yes or through red speaker icon.
 package com.abang.prayertimecompare
 
 import android.annotation.SuppressLint
@@ -78,13 +81,19 @@ import androidx.core.widget.TextViewCompat
 import android.util.TypedValue
 
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import com.abang.prayertimecompare.databinding.ActivityMainBinding
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
-import kotlin.apply
-import kotlin.or
-import kotlin.text.compareTo
+//import showStopAzanDialog
+//import stopAzanDialog
+//import prayerTabs
+//import updateTabStyles
 
+import kotlin.div
+import kotlin.sequences.ifEmpty
+import kotlin.text.appendLine
+import kotlin.text.compareTo
+import kotlin.text.get
+import kotlin.text.set
 
 // -------------------------------
 // Utilities
@@ -155,11 +164,11 @@ private var nextPrayerTimer: Runnable? = null
 private var dataReady = false
 
 // Top-level PlaybackService for android 13+ so app shows up in the system media controls
-// In PrayerTimeCompare.kt
 class PlaybackService : Service() {
 
     private lateinit var mediaSession: MediaSession
     private val CHANNEL_ID = "playback_channel"
+
 
     override fun onCreate() {
         super.onCreate()
@@ -182,6 +191,7 @@ class PlaybackService : Service() {
             .build()
         mediaSession.setMetadata(metadata)
 
+        // ✅ Wrap NotificationChannel creation (API 26+ only)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
@@ -192,23 +202,22 @@ class PlaybackService : Service() {
             nm.createNotificationChannel(channel)
         }
 
+        // ✅ Build notification (use channel only if API 26+)
         val notificationBuilder =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 Notification.Builder(this, CHANNEL_ID)
             } else {
-                @Suppress("DEPRECATION")
                 Notification.Builder(this)
             }
 
-        @Suppress("DEPRECATION")
         val notification = notificationBuilder
             .setContentTitle("Prayer Audio")
             .setContentText("Adhan is playing")
-            .setSmallIcon(R.drawable.ic_speaker_on)
+            .setSmallIcon(R.drawable.ic_speaker_on) // or app icon
             .setStyle(
                 Notification.MediaStyle()
                     .setMediaSession(mediaSession.sessionToken)
-                    .setShowActionsInCompactView(0)
+                    .setShowActionsInCompactView(0) // show STOP in compact view
             )
             .addAction(
                 Notification.Action.Builder(
@@ -217,9 +226,11 @@ class PlaybackService : Service() {
                     getActionIntent("ACTION_STOP")
                 ).build()
             )
-            .setOngoing(true)
+            .setOngoing(true) // prevents swipe-dismiss during Adhan
             .build()
 
+
+        // ✅ Wrap startForeground for Android 14+ (API 34)
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(
                 1,
@@ -227,6 +238,7 @@ class PlaybackService : Service() {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
             )
         } else {
+            // Legacy startForeground (API < 34)
             startForeground(1, notification)
         }
     }
@@ -240,36 +252,23 @@ class PlaybackService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val prayer = intent?.getStringExtra("prayer")
-        if (intent?.action == "STOP_AZAN") {
-            if (!prayer.isNullOrBlank()) {
-                sendPlaybackBroadcast(ACTION_PLAYBACK_STOPPED, prayer)
+        when (intent?.action) {
+            "ACTION_PAUSE" -> {
+                mediaSession.setPlaybackState(
+                    PlaybackState.Builder()
+                        .setState(PlaybackState.STATE_PAUSED, 0, 1.0f)
+                        .build()
+                )
             }
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-            stopSelf()
-            return START_NOT_STICKY
+            "ACTION_STOP" -> {
+                stopForeground(true)
+                stopSelf()
+            }
         }
-
-        if (!prayer.isNullOrBlank()) {
-            // This service only broadcasts state; it does not play audio.
-            // PrayerNotificationService handles playback.
-            sendPlaybackBroadcast(ACTION_PLAYBACK_STARTED, prayer)
-        }
-
         return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-
-    // Add this missing function
-    private fun sendPlaybackBroadcast(action: String, prayer: String) {
-        val intent = Intent(action).apply {
-            setPackage(packageName) // Make intent explicit
-            putExtra("prayer", prayer)
-        }
-        sendBroadcast(intent)
-    }
 
     override fun onDestroy() {
         super.onDestroy()
@@ -303,30 +302,29 @@ class MainActivity : Activity() {
     private val playbackStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val prayer = intent.getStringExtra("prayer") ?: return
-
             when (intent.action) {
                 ACTION_PLAYBACK_STARTED -> {
-                    runOnUiThread {
-                        // Set state without showing a dialog
-                        currentPlayingPrayer = prayer
-                        setSpeakerIconColor(prayer, Colors.RED)
-                        appendLine("Playback started for $prayer. Icon set to RED.")
-                    }
+                    val prayer = intent.getStringExtra("prayer") ?: return
+                    currentPlayingPrayer = prayer
+                    isPlaying = true
+                    setSpeakerIconColor(prayer, Colors.RED)
+                    showStopAzanDialog(prayer)
                 }
                 ACTION_PLAYBACK_STOPPED -> {
-                    runOnUiThread {
-                        // Notification stop: Reset icon to GREEN (alarm remains enabled)
-                        if (prayer == currentPlayingPrayer) {
-                            setSpeakerIconColor(prayer, Colors.GREEN)
-                            currentPlayingPrayer = null
-                            appendLine("Playback stopped for $prayer via notification. Icon set to GREEN.")
-                        }
+                    stopAzanDialog?.dismiss()
+                    stopAzanDialog = null
+                    isPlaying = false
+                    currentPlayingPrayer = null
+
+                    val prefs = getSharedPreferences("prayer_alarms", MODE_PRIVATE)
+                    prayerTabs.forEach { (p, _) ->
+                        val enabled = prefs.getBoolean(p, true)
+                        setSpeakerIconColor(p, if (enabled) Colors.GREEN else Colors.WHITE)
                     }
                 }
             }
         }
     }
-
 
     // Status Bar Priority Management
     private var currentStatusBarPriority = 0
@@ -389,7 +387,7 @@ class MainActivity : Activity() {
     }
 
     // Add these near your other timer-related fields:
-
+    private var stopAzanDialog: AlertDialog? = null
     private var currentPlayingPrayer: String? = null
     private var returnCountdownHandler: Handler? = null
     private var returnCountdownTask: Runnable? = null
@@ -491,22 +489,10 @@ class MainActivity : Activity() {
 
         // Apply system bar insets (top + bottom) as padding
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            view.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
-            insets
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            WindowInsetsCompat.CONSUMED
         }
-
-        // Register explicit broadcast receiver (no LocalBroadcastManager)
-        // Use ContextCompat for backward compatibility
-        ContextCompat.registerReceiver(
-            this,
-            playbackStateReceiver,
-            IntentFilter().apply {
-                addAction(ACTION_PLAYBACK_STARTED)
-                addAction(ACTION_PLAYBACK_STOPPED)
-            },
-            ContextCompat.RECEIVER_NOT_EXPORTED
-        )
 
         // Get current year for directories, etc.
         year = Calendar.getInstance().get(Calendar.YEAR)
@@ -594,14 +580,25 @@ class MainActivity : Activity() {
     // Modify onDestroy() to clean up blink handler
     override fun onDestroy() {
         super.onDestroy()
+
         try {
-            unregisterReceiver(playbackStateReceiver)
+            LocalBroadcastManager.getInstance(this).unregisterReceiver(playbackStateReceiver)
         } catch (_: Exception) { }
 
+        // Stop all handlers
         cancelReturnCountdown()
-        nextPrayerTimer?.let { handler.removeCallbacks(it) }; nextPrayerTimer = null
-        gracePeriodTimer?.let { handler.removeCallbacks(it) }; gracePeriodTimer = null
+
+        // Stop other timers
+        nextPrayerTimer?.let { handler.removeCallbacks(it) }
+        nextPrayerTimer = null
+
+        gracePeriodTimer?.let { handler.removeCallbacks(it) }
+        gracePeriodTimer = null
+
+        // Stop auto-mode checker
         handler.removeCallbacks(autoModeChecker)
+
+        // Stop blinking handler
         isBlinkingActive = false
         blinkHandler.removeCallbacks(blinkTask)
     }
@@ -624,26 +621,15 @@ class MainActivity : Activity() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                "prayer_channel",
+                "Prayer Notifications",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply { description = "Channel for prayer time azan playback" }
 
-        val channel = NotificationChannel(
-            "prayer_channel",
-            "Prayer Notifications",
-            NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            description = "Azan playback alerts"
-
-            // Keep notification sound controlled by MediaPlayer (optional)
-            setSound(null, null)
-
-            enableVibration(true)
-            enableLights(true)
-            lightColor = Colors.ORANGE
-            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
-
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(channel)
     }
 
 
@@ -943,30 +929,38 @@ class MainActivity : Activity() {
             iconView.setOnClickListener {
                 val playing = currentPlayingPrayer
                 if (playing == prayer) {
-                    // CASE 1: Azan is currently playing for THIS prayer (icon is RED).
-                    // Stop playback and disable the alarm (icon becomes WHITE).
-                    val serviceIntent = Intent(this, PrayerNotificationService::class.java).apply {
+                    // Stop the currently playing azan
+                    val stopIntent = Intent(this, PrayerNotificationService::class.java).apply {
                         action = "STOP_AZAN"
+                        putExtra("prayer", prayer)
                     }
-                    startService(serviceIntent) // This will stop the media player in the service.
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(stopIntent)
+                    } else {
+                        startService(stopIntent)
+                    }
 
-                    // Manually update UI state immediately.
-                    setSpeakerIconColor(prayer, Colors.WHITE)
-                    currentPlayingPrayer = null
+                    // Update state and prefs
                     prayerAlarmEnabled[prayer] = false
-                    val prefs = getSharedPreferences("prayer_alarms", MODE_PRIVATE)
                     prefs.edit().putBoolean(prayer, false).apply()
-                    appendLine("Playback stopped for $prayer via icon click. Alarm set to OFF. Icon set to WHITE.")
 
-                } else {
-                    // CASE 2: Azan is NOT playing for this prayer. Toggle alarm ON/OFF.
-                    val newState = !(prayerAlarmEnabled[prayer] ?: true)
-                    prayerAlarmEnabled[prayer] = newState
-                    val prefs = getSharedPreferences("prayer_alarms", MODE_PRIVATE)
-                    prefs.edit().putBoolean(prayer, newState).apply()
-                    setSpeakerIconColor(prayer, if (newState) Colors.GREEN else Colors.WHITE)
-                    appendLine("Alarm for $prayer: ${if (newState) "ON" else "OFF"}")
+                    // Reset icon color
+                    setSpeakerIconColor(prayer, Colors.WHITE)
+
+                    // Optional: dismiss dialog if showing
+                    stopAzanDialog?.dismiss()
+
+                    // Exit early, don’t run toggle logic
+                    return@setOnClickListener
                 }
+
+                // 🔽 Your existing toggle logic
+                val newState = !(prayerAlarmEnabled[prayer] ?: true)
+                prayerAlarmEnabled[prayer] = newState
+                prefs.edit().putBoolean(prayer, newState).apply()
+                setSpeakerIconColor(prayer, if (newState) Colors.GREEN else Colors.WHITE)
+                appendLine("Alarm for $prayer: ${if (newState) "ON" else "OFF"}")
+                // existing scheduling/cancel logic (if any) remains elsewhere
             }
 
             iconCell.addView(iconView)
@@ -2278,6 +2272,13 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+            playbackStateReceiver,
+            IntentFilter().apply {
+                addAction(ACTION_PLAYBACK_STARTED)
+                addAction(ACTION_PLAYBACK_STOPPED)
+            }
+        )
 
         if (dataReady) {
             // Re-bind table/logs from buffer
@@ -3187,15 +3188,14 @@ class MainActivity : Activity() {
 
     // --- 2. Nested Foreground Service ---
     // 🔹 Nested Foreground Service
-    // In PrayerTimeCompare.kt
     class PrayerNotificationService : Service() {
         private var mediaPlayer: MediaPlayer? = null
 
         override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
             if (intent?.action == "STOP_AZAN") {
                 val prayer = intent.getStringExtra("prayer")
-                try {
-                    mediaPlayer?.stop()
+
+                try { mediaPlayer?.stop()
                 } catch (_: IllegalStateException) {
                     MainActivity.appendLogEntry("MediaPlayer.stop() called in wrong state")
                 }
@@ -3203,9 +3203,10 @@ class MainActivity : Activity() {
                 mediaPlayer = null
 
                 if (!prayer.isNullOrBlank()) {
-                    sendPlaybackBroadcast(ACTION_PLAYBACK_STOPPED, prayer)
+                    val stopped = Intent(ACTION_PLAYBACK_STOPPED).putExtra("prayer", prayer)
+                    LocalBroadcastManager.getInstance(this).sendBroadcast(stopped)
                 }
-                @Suppress("DEPRECATION")
+
                 stopForeground(true)
                 stopSelf()
                 return START_NOT_STICKY
@@ -3220,116 +3221,58 @@ class MainActivity : Activity() {
 
             startForeground(1001, createNotification(prayer))
             playAzan(prayer)
-            sendPlaybackBroadcast(ACTION_PLAYBACK_STARTED, prayer) // Added call
             return START_STICKY
         }
 
         private fun playAzan(prayer: String) {
             try {
                 val audioRes = if (prayer == "Fajr") R.raw.azan_fajr else R.raw.azan_standard
-                mediaPlayer = MediaPlayer.create(this, audioRes)
-
-                if (mediaPlayer == null) {
-                    Log.e("PrayerNotificationService", "MediaPlayer.create returned null for $prayer")
-                    sendPlaybackBroadcast(ACTION_PLAYBACK_STOPPED, prayer)
-                    stopSelf()
-                    return
-                }
-
-                mediaPlayer?.apply {
+                mediaPlayer = MediaPlayer.create(this, audioRes).apply {
                     setOnCompletionListener {
-                        sendPlaybackBroadcast(ACTION_PLAYBACK_STOPPED, prayer)
+                        broadcastPlaybackState(ACTION_PLAYBACK_STOPPED, prayer)
                         MainActivity.appendLogEntry("Azan finished for $prayer")
-                        @Suppress("DEPRECATION")
-                        stopForeground(true)
                         stopSelf()
                     }
                     setOnErrorListener { _, what, extra ->
-                        Log.e("PrayerNotificationService", "MediaPlayer error: what=$what, extra=$extra")
                         MainActivity.appendLogEntry("Azan error: what=$what extra=$extra")
-                        sendPlaybackBroadcast(ACTION_PLAYBACK_STOPPED, prayer)
+                        broadcastPlaybackState(ACTION_PLAYBACK_STOPPED, prayer)
                         stopSelf()
                         true
                     }
                     start()
-                    MainActivity.appendLogEntry("Azan started for $prayer")
+                    broadcastPlaybackState(ACTION_PLAYBACK_STARTED, prayer)
                 }
             } catch (e: Exception) {
-                Log.e("PrayerNotificationService", "Error playing azan for $prayer", e)
                 MainActivity.appendLogEntry("Error playing azan: ${e.message}")
-                sendPlaybackBroadcast(ACTION_PLAYBACK_STOPPED, prayer)
+                broadcastPlaybackState(ACTION_PLAYBACK_STOPPED, prayer)
                 stopSelf()
             }
         }
 
-        // This function was removed in your code, re-add it.
         private fun broadcastPlaybackState(action: String, prayer: String) {
-            val intent = Intent(action).apply {
-                setPackage(packageName)
-                putExtra("prayer", prayer)
-            }
-            sendBroadcast(intent)
+            val intent = Intent(action).apply { putExtra("prayer", prayer) }
+            LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
         }
 
         private fun createNotification(prayer: String): Notification {
-            val stopIntent = Intent(this, MainActivity.PrayerNotificationService::class.java).apply {
+            val stopIntent = Intent(this, PrayerNotificationService::class.java).apply {
                 action = "STOP_AZAN"
-                putExtra("prayer", prayer)
             }
             val stopPendingIntent = PendingIntent.getService(
-                this,
-                1,
-                stopIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            // Heads-up reliability: fullScreenIntent (alarm-style peek)
-            val fsIntent = Intent(this, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                putExtra("from_azan", true)
-                putExtra("prayer", prayer)
-            }
-            val fsPendingIntent = PendingIntent.getActivity(
-                this,
-                2,
-                fsIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE
             )
 
             return NotificationCompat.Builder(this, "prayer_channel")
-                .setContentTitle("Azan: $prayer")
-                .setContentText("Playing now")
-                .setSmallIcon(R.drawable.ic_speaker_on)
-                .addAction(R.drawable.ic_stop, "Stop", stopPendingIntent)
-
-                // Foreground persistence during playback
-                .setOngoing(true)
-                .setAutoCancel(false)
-
-                // Heads-up knobs (pre-O uses priority; O+ uses channel importance)
+                .setContentTitle("🕌 $prayer Prayer Time")
+                .setContentText("Azan is playing")
+                .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                .addAction(android.R.drawable.ic_media_pause, "Stop", stopPendingIntent)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setCategory(NotificationCompat.CATEGORY_ALARM)
-
-                // Robust: forces heads-up style presentation on many OEMs
-                .setFullScreenIntent(fsPendingIntent, true)
-
-                // Optional: reduce “silent collapse” behavior
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .build()
         }
 
         override fun onBind(intent: Intent?): IBinder? = null
-
-        // Add this missing function
-        private fun sendPlaybackBroadcast(action: String, prayer: String) {
-            val intent = Intent(action).apply {
-                setPackage(packageName) // Make intent explicit to fix lint warning
-                putExtra("prayer", prayer)
-            }
-            sendBroadcast(intent)
-        }
     }
-
     // 3. Simple scheduling functions (add to existing MainActivity)
     private fun scheduleNextPrayerNotification() {
         val (nextPrayer, nextTime) = getNextPrayerAndTime()
@@ -3499,5 +3442,29 @@ class MainActivity : Activity() {
         binding.rootLayout.requestLayout()
     }
 
+    private fun showStopAzanDialog(prayer: String) {
+        runOnUiThread {
+            stopAzanDialog?.dismiss()
+            stopAzanDialog = AlertDialog.Builder(this)
+                .setTitle("Stop Azan?")
+                .setPositiveButton("Yes") { dialog, _ ->
+                    val stopIntent = Intent(this, PrayerNotificationService::class.java).apply {
+                        action = "STOP_AZAN"
+                        putExtra("prayer", prayer)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(stopIntent)
+                    } else {
+                        startService(stopIntent)
+                    }
+                    dialog.dismiss()
+                }
+                .setNegativeButton("No") { dialog, _ ->
+                    dialog.dismiss()
+                }
+                .create()
+            stopAzanDialog?.show()
+        }
+    }
 
 }

@@ -327,7 +327,19 @@ class MainActivity : Activity() {
         }
     }
 
-
+    // Debug mode long-press handler 5-seconds
+    private val debugHandler = Handler(Looper.getMainLooper())
+    private val debugLongPressRunnable = Runnable {
+        DEBUG_MODE = !DEBUG_MODE
+        runOnUiThread {
+            Toast.makeText(this, "Debug Mode ${if (DEBUG_MODE) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
+        }
+        if (DEBUG_MODE) {
+            enterDebugMode()
+        } else {
+            exitDebugMode()
+        }
+    }
     // Status Bar Priority Management
     private var currentStatusBarPriority = 0
     private val STATUS_BAR_PRIORITIES = object {
@@ -520,7 +532,7 @@ class MainActivity : Activity() {
         }
 
         // --- Initialize UI using binding ---
-        binding.title.text = "PrayerTimeCompare $appVersion"
+        binding.toolbar.title = "PrayerTimeCompare $appVersion"
         binding.rootLayout.setBackgroundColor(Colors.BG)
 
         // Settings icon click
@@ -549,7 +561,6 @@ class MainActivity : Activity() {
         buildTabs()         // Pass binding.topTabs instead of old variable
         setupCountdownArea()
         setupDebugToggle()
-        setupTitleLongPress()
 
         // Log initial configuration
         appendLine("Initial grace config: ${getGracePeriodConfig()}")
@@ -2351,54 +2362,23 @@ class MainActivity : Activity() {
     private fun Int.dpToPx(): Int = (this * resources.displayMetrics.density).toInt()
 
     // Enhanced debug toggle with visual feedback
+    @SuppressLint("ClickableViewAccessibility")
     private fun setupDebugToggle() {
-        val title = binding.rootLayout.getChildAt(0) as? TextView
-        title?.setOnClickListener {
-            // If already in debug mode, ONLY allow tab tapping to exit
-            if (DEBUG_MODE) {
-                // In debug mode, tab clicks exit, not title clicks
-                return@setOnClickListener
+        binding.toolbar.setOnTouchListener { _, event ->
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    // Start a 5-second timer when the user presses down
+                    debugHandler.postDelayed(debugLongPressRunnable, 5000)
+                    true // Consume the event
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    // Cancel the timer if the user lifts their finger before 5 seconds
+                    debugHandler.removeCallbacks(debugLongPressRunnable)
+                    true // Consume the event
+                }
+                else -> false
             }
-            // Normal 5-tap activation ONLY when not in debug mode
-            debugTapCount++
-
-            // Phase 1: Hidden (0-2 taps) - no feedback
-            if (debugTapCount < 3) {
-                handler.removeCallbacks(resetDebugCounterTask)
-                handler.postDelayed(resetDebugCounterTask, 3000)
-                return@setOnClickListener
-            }
-
-            // Phase 2: Countdown revealed (3-4 taps)
-            if (debugTapCount in 3..4) {
-                binding.statusBar.text = "Debug: ${debugTapCount}/5"
-                handler.removeCallbacks(resetDebugCounterTask)
-                handler.postDelayed({
-                    binding.statusBar.text = "Ready"
-                    debugTapCount = 0
-                }, 3000)
-                return@setOnClickListener
-            }
-
-            // Phase 3: Enter Debug Mode (5 taps)
-            if (debugTapCount >= 5) {
-                enterDebugMode()
-            }
-
         }
-        // ADD LONG PRESS LISTENER
-        title?.setOnLongClickListener {
-            appendLine("=== LONG PRESS DETECTED ===")
-            appendLine("Testing countdown system...")
-
-            // Show test menu or directly trigger
-            testCountdownNow()
-            debugLayoutStructure()  // Optional: show layout info
-
-            // Return true to indicate we handled the long press
-            true
-        }
-
     }
     private fun enterDebugMode() {
         DEBUG_MODE = true
@@ -2922,23 +2902,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun setupTitleLongPress() {
-        val title = binding.rootLayout.getChildAt(0) as? TextView
-        title?.setOnLongClickListener {
-            appendLine("=== LONG PRESS TEST ===")
-
-            // Test 1: Show immediate countdown
-            showBigCountdown(45, "Test")
-
-            // Test 2: Start simple countdown
-            handler.postDelayed({
-                startSimpleCountdown()
-            }, 1000)
-
-            return@setOnLongClickListener true
-        }
-    }
-
     // Modify updateCountdownWithSeconds() to handle the 0 seconds case
     private fun updateCountdownWithSeconds(prayer: String, totalSecondsRemaining: Int) {
         runOnUiThread {
@@ -2971,12 +2934,24 @@ class MainActivity : Activity() {
 
             // 🔹 Orientation‑aware formatting
             val orientation = resources.configuration.orientation
+            val metrics = resources.displayMetrics
+
+// Calculate adaptive text size based on width/height
+            val textSizeSp = if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+                // Larger text in portrait, scale with width
+                (metrics.widthPixels / metrics.density) / 10f   // e.g. ~40–50sp on phones
+            } else {
+                // Smaller text in landscape, scale with height
+                (metrics.heightPixels / metrics.density) / 20f  // e.g. ~20–25sp on phones
+            }
+
+// Apply adaptive text size in SP units
+            binding.bigCountdownView.setTextSize(TypedValue.COMPLEX_UNIT_SP, textSizeSp)
+
             if (orientation == Configuration.ORIENTATION_PORTRAIT) {
-                binding.bigCountdownView.textSize = 50f
                 binding.bigCountdownView.text = "$timeLine\n$prayerLine"   // two lines
                 (binding.bigCountdownView.layoutParams as LinearLayout.LayoutParams).weight = 0.2f
             } else {
-                binding.bigCountdownView.textSize = 25f
                 binding.bigCountdownView.text = "$timeLine $prayerLine"    // one line
                 (binding.bigCountdownView.layoutParams as LinearLayout.LayoutParams).weight = 0.1f
             }

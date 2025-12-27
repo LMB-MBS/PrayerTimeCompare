@@ -1,22 +1,20 @@
 <!-- res/layout/activity_main.xml -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/rootLayout"
     android:orientation="vertical"
     android:background="#000000"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <TextView
-        android:id="@+id/title"
-        android:text="PrayerTimeCompare"
-        android:textSize="20sp"
-        android:textColor="#FFFFFF"
-        android:background="#444444"
-        android:padding="16dp"
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:typeface="sans"
-        android:textStyle="bold" />
+        android:layout_height="@dimen/appbar_height"
+        android:background="@color/purple_500"
+        app:title="PrayerTimeCompare"
+        app:titleTextColor="@android:color/white"
+        app:titleTextAppearance="@style/MyToolbarTitleText" />
 
     <LinearLayout
         android:id="@+id/topTabs"

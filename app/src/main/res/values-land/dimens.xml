@@ -1,0 +1,4 @@
+<resources>
+    <!-- 50% of 56dp = 28dp -->
+    <dimen name="appbar_height">28dp</dimen>
+</resources>

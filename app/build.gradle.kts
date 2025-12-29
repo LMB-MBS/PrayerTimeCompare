@@ -1,3 +1,4 @@
+import org.gradle.kotlin.dsl.getByName
 
 plugins {
     alias(libs.plugins.android.application)
@@ -26,7 +27,13 @@ android {
 
 
     buildTypes {
-        release {
+        getByName("debug") {
+            isDebuggable = true
+            manifestPlaceholders["android:testOnly"] = false
+            enableAndroidTestCoverage = false
+            enableUnitTestCoverage = false
+        }
+        getByName("release") {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -34,6 +41,8 @@ android {
             )
         }
     }
+
+
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

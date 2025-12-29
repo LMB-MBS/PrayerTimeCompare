@@ -84,6 +84,8 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import kotlin.apply
 import kotlin.or
 import kotlin.text.compareTo
+import kotlin.text.get
+import kotlin.text.set
 
 
 // -------------------------------
@@ -294,6 +296,7 @@ private var tabRowLayout: LinearLayout? = null
 private const val ACTION_PLAYBACK_STARTED = "com.abang.prayertimecompare.PLAYBACK_STARTED"
 private const val ACTION_PLAYBACK_STOPPED = "com.abang.prayertimecompare.PLAYBACK_STOPPED"
 
+private var activePrayer: String? = null
 
 // -------------------------------
 // MainActivity
@@ -622,17 +625,19 @@ class MainActivity : Activity() {
         icon.setColorFilter(color)
     }
 
+    private fun resolvePrayer(): String {
+        return activePrayer ?: getNextPrayerAndTime().first
+    }
+
     private fun renderInitialTable() {
-        // Use whatever your current active prayer is, or a placeholder
-        val initialPrayer = activePrayer ?: "Fajr"
-        showPrayer(initialPrayer)
+        showPrayer(resolvePrayer())
     }
 
     private fun renderTableFromBuffer() {
-        // Reuse the same renderer with the current active prayer
-        val prayer = activePrayer ?: "Fajr"
-        showPrayer(prayer)
+        showPrayer(resolvePrayer())
     }
+
+
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -717,10 +722,6 @@ class MainActivity : Activity() {
 
                     // Update status bar
                     val actualNextPrayer = getActualNextPrayer(prayer)
-                    updateStatusBarWithPriority(
-                        "Switching to $actualNextPrayer in ${secondsRemaining}s",
-                        STATUS_BAR_PRIORITIES.GRACE_PERIOD
-                    )
 
                     // Decrement for the next tick
                     secondsRemaining--
@@ -894,13 +895,6 @@ class MainActivity : Activity() {
         binding.topTabs.orientation = LinearLayout.VERTICAL
 
         val tabWeights = listOf(0.18f, 0.22f, 0.16f, 0.27f, 0.17f)
-        val tabColors = listOf(
-            Colors.TAB_ACTIVE,
-            Colors.TAB_INACTIVE,
-            Colors.TAB_INACTIVE,
-            Colors.TAB_INACTIVE,
-            Colors.TAB_INACTIVE
-        )
 
         val iconRowHeight = 24.dpToPx()
         val tabRowHeight = 36.dpToPx()
@@ -988,7 +982,7 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, weight)
-                setBackgroundColor(tabColors[index])
+                setBackgroundColor(Colors.TAB_INACTIVE)
             }
 
             val label = TextView(this).apply {
@@ -1063,13 +1057,15 @@ class MainActivity : Activity() {
             tabRow.addView(tabCell)
 
             // Store all pieces for unified styling
-            prayerTabs[prayer] = Triple(label, iconView, iconCell)
+            prayerTabs[prayer] = Triple(label, iconView, tabCell)
         }
 
         binding.topTabs.addView(iconRow)
         binding.topTabs.addView(tabRow)
 
-        updateTabStyles()
+        if (activePrayer != null) {
+            updateTabStyles()
+        }
     }
 
 
@@ -1168,29 +1164,35 @@ class MainActivity : Activity() {
     }
 
     private fun updateTabStyles() {
-        val tabRow = tabRowLayout ?: return
-        for (i in 0 until tabRow.childCount) {
-            val tabCell = tabRow.getChildAt(i) as? LinearLayout ?: continue
-            val prayer = Prayers.ORDER.getOrNull(i) ?: continue
-            val views = prayerTabs[prayer] ?: continue
-            val label = views.first
-            val iconCell = views.third
-            val isActive = (prayer == activePrayer)
+        val (nextPrayerName, _) = getNextPrayerAndTime()
+        val nextPrayerHighlightColor = Color.parseColor("#008694") // The green shade for the next prayer
 
-            // Example styling: highlight active, dim inactive
-            val bgColor = if (isActive) Colors.TAB_ACTIVE else Colors.TAB_INACTIVE
-            tabCell.setBackgroundColor(bgColor)
-            iconCell.setBackgroundColor(bgColor)
-
-            tabCell.alpha = if (isActive) 1f else 0.9f
-            label.setTextColor(Color.WHITE)
-        }
-        // ensure icon colors reflect enabled/disabled when styles refresh
         prayerTabs.forEach { (prayer, triple) ->
+            val (_, icon, tabCell) = triple
+
+            // 1. Set background color based on whether it's the next prayer
+            val backgroundColor = if (prayer == nextPrayerName) {
+                nextPrayerHighlightColor
+            } else {
+                Colors.TAB_INACTIVE
+            }
+            tabCell.setBackgroundColor(backgroundColor)
+
+            // 2. Set alpha based on whether it's the active (selected) prayer
+            tabCell.alpha = if (prayer == activePrayer) 1.0f else 0.6f
+
+            // 3. Update icon color based on alarm/playback state
             val isEnabled = prayerAlarmEnabled[prayer] == true
-            triple.second.setColorFilter(if (isEnabled) Colors.GREEN else Colors.WHITE)
+            val playingPrayer = currentPlayingPrayer
+
+            if (playingPrayer != null && prayer == playingPrayer) {
+                icon.setColorFilter(Colors.RED)
+            } else {
+                icon.setColorFilter(if (isEnabled) Colors.GREEN else Colors.WHITE)
+            }
         }
     }
+
 
     // In showPrayer(), replace status bar updates:
     private fun showPrayer(prayer: String) {
@@ -2313,6 +2315,7 @@ class MainActivity : Activity() {
         outState.putSerializable("logs", LinkedHashMap(allLogs))
         outState.putString("activePrayer", activePrayer)
         outState.putBoolean("dataReady", dataReady)
+        outState.putString("currentPlayingPrayer", currentPlayingPrayer)
     }
 
 
@@ -2330,10 +2333,12 @@ class MainActivity : Activity() {
         // Restore active prayer and dataReady flag
         activePrayer = savedInstanceState.getString("activePrayer") ?: activePrayer
         dataReady = savedInstanceState.getBoolean("dataReady", false)
+        currentPlayingPrayer = savedInstanceState.getString("currentPlayingPrayer") ?: currentPlayingPrayer
 
         // Redraw depending on readiness
         if (dataReady) {
             renderTableFromBuffer()
+            updateTabStyles()
         } else {
             showLoadingPlaceholder()
         }

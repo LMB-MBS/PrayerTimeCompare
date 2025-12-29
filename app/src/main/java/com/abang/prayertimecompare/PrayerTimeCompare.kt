@@ -1391,7 +1391,7 @@ class MainActivity : Activity() {
                 text = "--------"
                 setTextColor(Colors.LOG_TEXT)
                 gravity = Gravity.CENTER
-                setPadding(4.dpToPx(), 2.dpToPx(), 4.dpToPx(), 2.dpToPx())
+                setPadding(4.dpToPx(), 1.dpToPx(), 4.dpToPx(), 2.dpToPx())
                 layoutParams = TableRow.LayoutParams(
                     0,
                     TableRow.LayoutParams.WRAP_CONTENT,
@@ -2854,7 +2854,12 @@ class MainActivity : Activity() {
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(Color.YELLOW)
             visibility = View.VISIBLE
-            setPadding(0, 20.dpToPx(), 0, 20.dpToPx())
+            setPadding(0, 2.dpToPx(), 0, 2.dpToPx())
+
+            // If you need to adjust layout params:
+            val lp = layoutParams as FrameLayout.LayoutParams
+            lp.gravity = Gravity.CENTER_HORIZONTAL
+            layoutParams = lp
         }
 
         // Configure graceTimerView
@@ -2866,7 +2871,7 @@ class MainActivity : Activity() {
             setTextColor(Color.RED)
             setBackgroundColor(Color.parseColor("#30000000"))
             visibility = View.GONE
-            setPadding(0, 30.dpToPx(), 0, 30.dpToPx())
+            setPadding(0, 10.dpToPx(), 0, 10.dpToPx())
         }
     }
 
@@ -2953,12 +2958,21 @@ class MainActivity : Activity() {
 // Apply adaptive text size in SP units
             binding.bigCountdownView.setTextSize(TypedValue.COMPLEX_UNIT_SP, textSizeSp)
 
+            // orientation block
             if (orientation == Configuration.ORIENTATION_PORTRAIT) {
                 binding.bigCountdownView.text = "$timeLine\n$prayerLine"   // two lines
-                (binding.bigCountdownView.layoutParams as LinearLayout.LayoutParams).weight = 0.2f
+
+                (binding.bigCountdownView.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                    lp.gravity = Gravity.CENTER_HORIZONTAL
+                    binding.bigCountdownView.layoutParams = lp
+                }
             } else {
                 binding.bigCountdownView.text = "$timeLine $prayerLine"    // one line
-                (binding.bigCountdownView.layoutParams as LinearLayout.LayoutParams).weight = 0.1f
+
+                (binding.bigCountdownView.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                    lp.gravity = Gravity.CENTER_HORIZONTAL
+                    binding.bigCountdownView.layoutParams = lp
+                }
             }
 
             // 🔹 Color coding

@@ -1,11 +1,13 @@
 <!-- res/layout/activity_main.xml -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/rootLayout"
     android:orientation="vertical"
     android:background="#000000"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    tools:context=".MainActivity">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
@@ -14,38 +16,144 @@
         android:background="@color/purple_500"
         app:title="PrayerTimeCompare"
         app:titleTextColor="@android:color/white"
-        app:titleTextAppearance="@style/MyToolbarTitleText" />
+        app:titleTextAppearance="@style/MyToolbarTitleText"
+        tools:background="#8800AA" />
 
     <LinearLayout
         android:id="@+id/topTabs"
-        android:orientation="horizontal"
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
         android:background="#333333"
         android:padding="8dp"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content" />
+        tools:background="#555555">
 
-    <!-- After topTabs and tableContainer -->
+        <!-- Row 1 -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            tools:text="SPK1"
+            tools:textColor="#FFFFFF"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            tools:text="SPK2"
+            tools:textColor="#FFFFFF"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            tools:text="SPK3"
+            tools:textColor="#FFFFFF"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            tools:text="SPK4"
+            tools:textColor="#FFFFFF"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            tools:text="SPK5"
+            tools:textColor="#FFFFFF"/>
+        </LinearLayout>
+
+        <!-- Row 2 -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                tools:text="Fajr"
+                tools:textColor="#FFFFFF"/>
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                tools:text="Dhuhr"
+                tools:textColor="#FFFFFF"/>
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                tools:text="Asr"
+                tools:textColor="#FFFFFF"/>
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                tools:text="Maghrib"
+                tools:textColor="#FFFFFF"/>
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                tools:text="Isha"
+                tools:textColor="#FFFFFF"/>
+        </LinearLayout>
+    </LinearLayout>
+<FrameLayout
+    android:layout_width="match_parent"
+    android:layout_height="100dp"
+    android:gravity="center">
     <TextView
         android:id="@+id/bigCountdownView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:textSize="50sp"
+        android:textSize="70sp"
         android:gravity="center"
-        android:textColor="#FFFF00"
+        android:textColor="#00FF00"
         android:visibility="visible"
-        android:paddingTop="20dp"
-        android:paddingBottom="20dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
         android:background="@android:color/transparent"
         android:typeface="monospace"
         android:textStyle="bold"
-        android:layout_gravity="center_horizontal"/>
+        android:layout_gravity="center"
+        android:includeFontPadding="false"
+        android:lineSpacingExtra="0dp"
+        android:lineSpacingMultiplier="1.0"
+        tools:text="00:59" />
+</FrameLayout>
 
-    <ScrollView
+
+<ScrollView
         android:id="@+id/tableContainer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:background="#000000">
+        android:background="#000000"
+        tools:background="#222222">
 
         <LinearLayout
             android:orientation="vertical"
@@ -60,14 +168,32 @@
                 android:typeface="monospace"
                 android:padding="8dp"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
+                android:layout_height="wrap_content"
+                tools:visibility="visible"
+                tools:text="Debug info placeholder" />
 
             <TableLayout
                 android:id="@+id/contentTable"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:stretchColumns="*"
-                android:background="#000000" />
+                android:background="#000000"
+                tools:background="#444444">
+
+                <!-- Preview rows -->
+                <TableRow>
+                    <TextView tools:text="Method" tools:textColor="#FFFFFF"/>
+                    <TextView tools:text="Mon 29" tools:textColor="#FFFFFF"/>
+                    <TextView tools:text="Tue 30" tools:textColor="#FFFFFF"/>
+                    <TextView tools:text="Wed 31" tools:textColor="#FFFFFF"/>
+                </TableRow>
+                <TableRow>
+                    <TextView tools:text="M99 OUIF" tools:textColor="#FFFFFF"/>
+                    <TextView tools:text="19:53" tools:textColor="#FFFFFF"/>
+                    <TextView tools:text="19:53" tools:textColor="#FFFFFF"/>
+                    <TextView tools:text="19:53" tools:textColor="#FFFFFF"/>
+                </TableRow>
+            </TableLayout>
         </LinearLayout>
     </ScrollView>
 
@@ -75,7 +201,7 @@
         android:id="@+id/graceTimerView"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textSize="48sp"
+        android:textSize="30sp"
         android:gravity="center"
         android:textColor="#FF0000"
         android:visibility="gone"
@@ -84,15 +210,17 @@
         android:background="#30000000"
         android:typeface="monospace"
         android:textStyle="bold"
-        />
+        tools:visibility="visible"
+        tools:text="Grace Timer" />
 
     <LinearLayout
         android:id="@+id/statusContainer"
         android:orientation="horizontal"
-        android:background="#333333"
         android:gravity="center_vertical"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content">
+        android:layout_height="wrap_content"
+        android:background="#333333"
+        tools:background="#555555">
 
         <TextView
             android:id="@+id/statusBar"
@@ -101,7 +229,8 @@
             android:padding="12dp"
             android:layout_width="0dp"
             android:layout_weight="1"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content"
+            tools:text="Status: Ready" />
 
         <TextView
             android:id="@+id/settingsIcon"
@@ -111,6 +240,7 @@
             android:padding="12dp"
             android:gravity="center"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content"
+            tools:text="⚙" />
     </LinearLayout>
 </LinearLayout>

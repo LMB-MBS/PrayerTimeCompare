@@ -38,7 +38,6 @@ import kotlin.math.max
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import org.json.JSONObject
 import java.io.File
@@ -67,9 +66,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 
 import android.util.Log
-import android.widget.FrameLayout
 import android.widget.ImageView
-import android.widget.TableLayout
 import android.widget.TableRow
 import androidx.core.net.toUri
 import kotlin.math.sqrt
@@ -77,17 +74,11 @@ import kotlin.math.sqrt
 import androidx.core.widget.TextViewCompat
 import android.util.TypedValue
 
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.abang.prayertimecompare.databinding.ActivityMainBinding
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import kotlin.apply
-import kotlin.or
-import kotlin.text.compareTo
-import kotlin.text.get
-import kotlin.text.set
 import kotlin.text.toInt
-import kotlin.times
+
 
 
 // -------------------------------
@@ -1228,7 +1219,7 @@ class MainActivity : Activity() {
                 // Force redraw
                 binding.contentTable.post {
                     binding.contentTable.invalidate()
-                    binding.tableContainer.fullScroll(View.FOCUS_UP)
+                    binding.contentScroll.fullScroll(View.FOCUS_UP)
                 }
             }
         }
@@ -2304,7 +2295,7 @@ class MainActivity : Activity() {
             if (DEBUG_MODE) {
                 val allLogsText = allLogs.values.joinToString("\n")
                 binding.debugTextView.text = allLogsText
-                binding.tableContainer.post { binding.tableContainer.fullScroll(View.FOCUS_DOWN) }
+                binding.tableContainer.post { binding.contentScroll.fullScroll(View.FOCUS_DOWN) }
             }
         }
     }
@@ -2326,7 +2317,7 @@ class MainActivity : Activity() {
         if (DEBUG_MODE) {
             val allLogsText = allLogs.values.joinToString("\n")
             binding.debugTextView.text = allLogsText
-            binding.tableContainer.post { binding.tableContainer.fullScroll(View.FOCUS_DOWN) }
+            binding.tableContainer.post { binding.contentScroll.fullScroll(View.FOCUS_DOWN) }
         }
     }
 
@@ -2427,7 +2418,7 @@ class MainActivity : Activity() {
 
             // Auto-scroll to bottom to show the most recent entries
             binding.tableContainer.post {
-                binding.tableContainer.fullScroll(View.FOCUS_DOWN)
+                binding.contentScroll.fullScroll(View.FOCUS_DOWN)
             }
 
             graceTimerView.visibility = View.GONE

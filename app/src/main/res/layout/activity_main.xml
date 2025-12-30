@@ -145,73 +145,65 @@
             tools:text="00:59\nMaghrib"/>
     </FrameLayout>
 
-    <!-- Scrollable table -->
-    <ScrollView
+    <FrameLayout
         android:id="@+id/tableContainer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:background="#000000"
-        tools:background="#222222">
+        android:layout_weight="1">
 
-        <LinearLayout
-            android:orientation="vertical"
+        <!-- Scrollable table -->
+        <ScrollView
+            android:id="@+id/contentScroll"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content">
+            android:layout_height="match_parent"
+            android:background="#000000"
+            tools:background="#222222">
 
-            <TextView
-                android:id="@+id/debugTextView"
-                android:visibility="gone"
-                android:textColor="#CCCCCC"
-                android:textSize="10sp"
-                android:typeface="monospace"
-                android:padding="8dp"
+            <LinearLayout
+                android:orientation="vertical"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                tools:visibility="visible"
-                tools:text="Debug info placeholder" />
+                android:layout_height="wrap_content">
 
-            <TableLayout
-                android:id="@+id/contentTable"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:stretchColumns="*"
-                android:background="#000000"
-                tools:background="#444444">
+                <TextView
+                    android:id="@+id/debugTextView"
+                    android:visibility="gone"
+                    android:textColor="#CCCCCC"
+                    android:textSize="10sp"
+                    android:typeface="monospace"
+                    android:padding="8dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    tools:visibility="visible"
+                    tools:text="Debug info placeholder" />
 
-                <!-- Preview rows -->
-                <TableRow>
-                    <TextView tools:text="Method" tools:textColor="#FFFFFF"/>
-                    <TextView tools:text="Mon 29" tools:textColor="#FFFFFF"/>
-                    <TextView tools:text="Tue 30" tools:textColor="#FFFFFF"/>
-                    <TextView tools:text="Wed 31" tools:textColor="#FFFFFF"/>
-                </TableRow>
-                <TableRow>
-                    <TextView tools:text="M99 OUIF" tools:textColor="#FFFFFF"/>
-                    <TextView tools:text="19:53" tools:textColor="#FFFFFF"/>
-                    <TextView tools:text="19:53" tools:textColor="#FFFFFF"/>
-                    <TextView tools:text="19:53" tools:textColor="#FFFFFF"/>
-                </TableRow>
-            </TableLayout>
-        </LinearLayout>
-    </ScrollView>
+                <TableLayout
+                    android:id="@+id/contentTable"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:stretchColumns="*"
+                    android:background="#000000"
+                    tools:background="#444444"/>
+            </LinearLayout>
+        </ScrollView>
 
-    <!-- Grace counter -->
-    <TextView
-        android:id="@+id/graceTimerView"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        <!-- Grace counter overlay -->
+        <TextView
+            android:id="@+id/graceTimerView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
         android:textSize="30sp"
         android:gravity="center"
         android:textColor="#FF0000"
         android:visibility="gone"
-        android:paddingTop="30dp"
-        android:paddingBottom="30dp"
-        android:background="#30000000"
-        android:typeface="monospace"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
+        android:background="#80000000"
+        android:fontFamily="monospace"
         android:textStyle="bold"
         tools:visibility="visible"
-        tools:text="Grace Timer" />
+        tools:text="Grace Timer"/>
+    </FrameLayout>
 
     <!-- Status bar -->
     <LinearLayout

@@ -86,6 +86,8 @@ import kotlin.or
 import kotlin.text.compareTo
 import kotlin.text.get
 import kotlin.text.set
+import kotlin.text.toInt
+import kotlin.times
 
 
 // -------------------------------
@@ -499,6 +501,8 @@ class MainActivity : Activity() {
         // --- Edge-to-edge display setup --- (important for modern UI)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
+
+
         // --- Initialize ViewBinding ---
         binding = ActivityMainBinding.inflate(layoutInflater)
         graceTimerView = binding.graceTimerView // or findViewById(R.id.graceTimerView)
@@ -510,6 +514,8 @@ class MainActivity : Activity() {
             view.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
+        // Initial
+        //updateCountdownFrameHeight()
 
         // Register explicit broadcast receiver (no LocalBroadcastManager)
         // Use ContextCompat for backward compatibility
@@ -1453,6 +1459,20 @@ class MainActivity : Activity() {
         }
     }
 
+    // update big countdown height on orientation change
+    private fun updateCountdownFrameHeight() {
+        val frame = binding.bigCountdownView
+        val lp = frame.layoutParams
+        val orientation = resources.configuration.orientation
+
+        lp.height = if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            (resources.displayMetrics.heightPixels * 0.5f).toInt() // 10% of screen height
+        } else {
+            100.dpToPx() // fixed portrait height
+        }
+        frame.layoutParams = lp
+    }
+
     // -------------------------------
     // Directories & backup
     // -------------------------------
@@ -2300,6 +2320,8 @@ class MainActivity : Activity() {
             showLoadingPlaceholder()
         }
 
+        //updateCountdownFrameHeight()
+
         // Always refresh logs if debug mode is active
         if (DEBUG_MODE) {
             val allLogsText = allLogs.values.joinToString("\n")
@@ -2848,7 +2870,6 @@ class MainActivity : Activity() {
     private fun setupCountdownArea() {
         // Configure bigCountdownView
         binding.bigCountdownView.apply {
-            textSize = 50f
             gravity = Gravity.CENTER
             typeface = Typeface.MONOSPACE
             setTypeface(typeface, Typeface.BOLD)
@@ -2856,10 +2877,6 @@ class MainActivity : Activity() {
             visibility = View.VISIBLE
             setPadding(0, 2.dpToPx(), 0, 2.dpToPx())
 
-            // If you need to adjust layout params:
-            val lp = layoutParams as FrameLayout.LayoutParams
-            lp.gravity = Gravity.CENTER_HORIZONTAL
-            layoutParams = lp
         }
 
         // Configure graceTimerView
@@ -2944,36 +2961,13 @@ class MainActivity : Activity() {
 
             // 🔹 Orientation‑aware formatting
             val orientation = resources.configuration.orientation
-            val metrics = resources.displayMetrics
-
-// Calculate adaptive text size based on width/height
-            val textSizeSp = if (orientation == Configuration.ORIENTATION_PORTRAIT) {
-                // Larger text in portrait, scale with width
-                (metrics.widthPixels / metrics.density) / 10f   // e.g. ~40–50sp on phones
+            binding.bigCountdownView.text = if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+                "$timeLine\n$prayerLine"
             } else {
-                // Smaller text in landscape, scale with height
-                (metrics.heightPixels / metrics.density) / 20f  // e.g. ~20–25sp on phones
+                "$timeLine $prayerLine"
             }
 
-// Apply adaptive text size in SP units
-            binding.bigCountdownView.setTextSize(TypedValue.COMPLEX_UNIT_SP, textSizeSp)
 
-            // orientation block
-            if (orientation == Configuration.ORIENTATION_PORTRAIT) {
-                binding.bigCountdownView.text = "$timeLine\n$prayerLine"   // two lines
-
-                (binding.bigCountdownView.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
-                    lp.gravity = Gravity.CENTER_HORIZONTAL
-                    binding.bigCountdownView.layoutParams = lp
-                }
-            } else {
-                binding.bigCountdownView.text = "$timeLine $prayerLine"    // one line
-
-                (binding.bigCountdownView.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
-                    lp.gravity = Gravity.CENTER_HORIZONTAL
-                    binding.bigCountdownView.layoutParams = lp
-                }
-            }
 
             // 🔹 Color coding
             val color = when {

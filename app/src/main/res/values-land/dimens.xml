@@ -1,4 +1,8 @@
 <resources>
-    <!-- 50% of 56dp = 28dp -->
     <dimen name="appbar_height">28dp</dimen>
+    <dimen name="countdown_text_size">25sp</dimen>
+    <dimen name="countdown_margin_top">8dp</dimen>
+    <dimen name="countdown_margin_bottom">4dp</dimen>
+    <!-- no countdown_frame_height here -->
 </resources>
+

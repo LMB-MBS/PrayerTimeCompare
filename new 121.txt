@@ -2977,9 +2977,9 @@ class MainActivity : Activity() {
                 binding.bigCountdownView.text = "$timeLine\n$prayerLine"   // two lines
                 (binding.bigCountdownView.layoutParams as LinearLayout.LayoutParams).weight = 0.2f
             } else {
-                binding.bigCountdownView.textSize = 25f
+                binding.bigCountdownView.textSize = 40f
                 binding.bigCountdownView.text = "$timeLine $prayerLine"    // one line
-                (binding.bigCountdownView.layoutParams as LinearLayout.LayoutParams).weight = 0.1f
+                (binding.bigCountdownView.layoutParams as LinearLayout.LayoutParams).weight = 0.2f
             }
 
             // 🔹 Color coding

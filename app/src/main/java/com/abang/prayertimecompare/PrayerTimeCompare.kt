@@ -559,6 +559,7 @@ class MainActivity : Activity() {
 
 
         buildTabs()         // Pass binding.topTabs instead of old variable
+        // Defer updateTabStyles() until onRestoreInstanceState or data ready
         setupCountdownArea()
         setupDebugToggle()
 
@@ -579,14 +580,21 @@ class MainActivity : Activity() {
                 scheduleNextPrayerNotification()
                 startSynchronizedAutoChecker()
 
+                // Compute next prayer only once here
                 val (detectedPrayer, _) = getNextPrayerAndTime()
 
                 runOnUiThread {
-                    activePrayer = detectedPrayer
+                    // Fresh launch → assign detected prayer
+                    // Rotation → let onRestoreInstanceState() overwrite later
+                    if (savedInstanceState == null) {
+                        activePrayer = detectedPrayer
+                    }
+
                     updateTabStyles()
                     renderTableFromBuffer()
                     dataReady = true
-                    appendLine("Auto-detected prayer: $activePrayer")
+
+                    appendLine("Active prayer: $activePrayer")
                     binding.statusBar.text = ""
                     currentStatusBarPriority = STATUS_BAR_PRIORITIES.NORMAL
                     startAdaptiveSynchronizedCountdown()
@@ -737,6 +745,77 @@ class MainActivity : Activity() {
             }
         }
 
+        handler.post(gracePeriodTimer as Runnable)
+    }
+
+    private fun restoreGracePeriod(prayer: String, remainingSeconds: Int) {
+        appendLine("=== RESTORE GRACE PERIOD FOR $prayer ===")
+        appendLine("Remaining seconds: $remainingSeconds")
+
+        // Set global grace state
+        currentGracePrayer = prayer
+        graceEndTime = System.currentTimeMillis() + (remainingSeconds * 1000)
+
+        appendLine("=== GRACE PERIOD RESTORED ===")
+        appendLine("Prayer: $prayer, Remaining: $remainingSeconds seconds")
+        appendLine("Will end at: ${SimpleDateFormat("HH:mm:ss").format(Date(graceEndTime))}")
+
+        // Stop prayer countdown (but don't hide the view)
+        nextPrayerTimer?.let { handler.removeCallbacks(it) }
+        nextPrayerTimer = null
+
+        // UPDATE: Show "Mosque-Icon Prayer TIME" in prayer timer position
+        // and show grace timer below table
+        runOnUiThread {
+            // 1. REPLACE prayer timer with "🕌 Prayer TIME" (same position, stays visible)
+            binding.bigCountdownView.text = "🕌\n$prayer TIME"
+            binding.bigCountdownView.setTextColor(Color.GREEN)
+            binding.bigCountdownView.visibility = View.VISIBLE  // IMPORTANT: Keep it visible!
+
+            // 2. Show grace timer BELOW table
+            graceTimerView.visibility = View.VISIBLE
+            updateGraceTimerDisplay(remainingSeconds, prayer)
+
+            // 3. Force UI to show current prayer tab
+            activePrayer = prayer
+            updateTabStyles()
+            showPrayer(activePrayer)
+
+            // 4. Update status bar
+            binding.statusBar.text = "Next prayer: ${getActualNextPrayer(prayer)}"
+        }
+
+        var secondsRemaining = remainingSeconds
+
+        gracePeriodTimer = object : Runnable {
+            override fun run() {
+                if (secondsRemaining > 0) {
+                    // Use wall-clock to compute the second boundary, but schedule using uptimeMillis
+                    val nowWall = System.currentTimeMillis()
+                    val ms = (nowWall % 1000).toInt()
+
+                    // Update display using the current remaining seconds
+                    updateGraceTimerDisplay(secondsRemaining, prayer)
+
+                    // Update status bar
+                    val actualNextPrayer = getActualNextPrayer(prayer)
+
+                    // Decrement for the next tick
+                    secondsRemaining--
+
+                    // Compute millis until the next exact second boundary (1..1000)
+                    val millisUntilNextSecond = max(1, 1000 - ms)
+
+                    // Schedule using uptimeMillis to avoid wall-clock jumps affecting timing
+                    val nextUptime = SystemClock.uptimeMillis() + millisUntilNextSecond
+                    handler.postAtTime(this, nextUptime)
+
+                } else {
+                    // No more seconds: end immediately and do not schedule another tick
+                    endGracePeriod()
+                }
+            }
+        }
 
         handler.post(gracePeriodTimer as Runnable)
     }
@@ -1060,9 +1139,10 @@ class MainActivity : Activity() {
         binding.topTabs.addView(iconRow)
         binding.topTabs.addView(tabRow)
 
-        if (activePrayer != null) {
-            updateTabStyles()
-        }
+        // Remove immediate updateTabStyles() - will be called after state restoration
+        // if (activePrayer != null) {
+        //     updateTabStyles()
+        // }
     }
 
 
@@ -2329,6 +2409,9 @@ class MainActivity : Activity() {
         outState.putString("activePrayer", activePrayer)
         outState.putBoolean("dataReady", dataReady)
         outState.putString("currentPlayingPrayer", currentPlayingPrayer)
+
+        outState.putLong("graceEndTime", graceEndTime)
+        outState.putString("currentGracePrayer", currentGracePrayer)
     }
 
 
@@ -2347,6 +2430,22 @@ class MainActivity : Activity() {
         activePrayer = savedInstanceState.getString("activePrayer") ?: activePrayer
         dataReady = savedInstanceState.getBoolean("dataReady", false)
         currentPlayingPrayer = savedInstanceState.getString("currentPlayingPrayer") ?: currentPlayingPrayer
+
+        graceEndTime = savedInstanceState.getLong("graceEndTime", 0L)
+        currentGracePrayer = savedInstanceState.getString("currentGracePrayer")
+
+        // Add this logic inside onRestoreInstanceState or at the end of onCreate
+        if (currentGracePrayer != null && graceEndTime > System.currentTimeMillis()) {
+            // A grace period was active. We need to restore it.
+            val secondsRemaining = ((graceEndTime - System.currentTimeMillis()) / 1000).toInt()
+            if (secondsRemaining > 0) {
+                // Re-start the grace period with the time remaining
+                restoreGracePeriod(currentGracePrayer!!, secondsRemaining)
+            }
+        }
+
+        // Apply tab styles AFTER restoring correct activePrayer
+        updateTabStyles()
 
         // Redraw depending on readiness
         if (dataReady) {

@@ -451,7 +451,7 @@ class MainActivity : Activity() {
                 if (currentPrayer != null && gracePeriodTimer == null) {
                     // New prayer time detected - start grace period
                     appendLine("Auto-detected: $currentPrayer time starting")
-                    startGracePeriod(currentPrayer)
+                    startOrResotreGracePeriod(currentPrayer)
                 } else if (currentPrayer == null && gracePeriodTimer == null) {
                     // Not in grace period - check normal progression
                     val (nextPrayer, _) = getNextPrayerAndTime()
@@ -668,39 +668,47 @@ class MainActivity : Activity() {
     }
 
 
-    // Updated startGracePeriod() with your tuning
-    private fun startGracePeriod(prayer: String) {
-        // Get user's preference for this prayer
-        val graceConfig = getGracePeriodConfig()
-        val graceMinutes = graceConfig[prayer] ?: 1// Default to 1 if somehow missing
+    private fun startOrResotreGracePeriod(
+        prayer: String,
+        remainingSeconds: Int? = null,
+        triggerPlayback: Boolean = true
+    ) {
+        // Determine duration
+        val graceSeconds: Int = if (remainingSeconds != null) {
+            remainingSeconds
+        } else {
+            val graceConfig = getGracePeriodConfig()
+            val graceMinutes = graceConfig[prayer] ?: 1 // Default to 1 if missing
+            graceMinutes * 60
+        }
 
-        // Calculate grace period duration
-        val graceSeconds = graceMinutes * 60
-
-        appendLine("=== START GRACE PERIOD FOR $prayer ===")
-        appendLine("User preference: $graceMinutes minutes (from settings)")
+        appendLine("=== BEGIN GRACE PERIOD FOR $prayer ===")
+        if (remainingSeconds == null) {
+            appendLine("User preference: ${graceSeconds / 60} minutes (from settings)")
+        } else {
+            appendLine("Restored remaining: $graceSeconds seconds")
+        }
 
         // Set global grace state
         currentGracePrayer = prayer
         graceEndTime = System.currentTimeMillis() + (graceSeconds * 1000)
 
-        appendLine("=== GRACE PERIOD STARTED ===")
-        appendLine("Prayer: $prayer, Duration: $graceMinutes minutes")
+        appendLine("=== GRACE PERIOD ACTIVE ===")
+        appendLine("Prayer: $prayer, Duration: $graceSeconds seconds")
         appendLine("Will end at: ${SimpleDateFormat("HH:mm:ss").format(Date(graceEndTime))}")
 
         // Stop prayer countdown (but don't hide the view)
         nextPrayerTimer?.let { handler.removeCallbacks(it) }
         nextPrayerTimer = null
 
-        // UPDATE: Show "Mosque-Icon Prayer TIME" in prayer timer position
-        // and show grace timer below table
+        // UI updates
         runOnUiThread {
-            // 1. REPLACE prayer timer with "🕌 Prayer TIME" (same position, stays visible)
+            // 1. Replace prayer timer with "🕌 Prayer TIME"
             binding.bigCountdownView.text = "🕌\n$prayer TIME"
             binding.bigCountdownView.setTextColor(Color.GREEN)
-            binding.bigCountdownView.visibility = View.VISIBLE  // IMPORTANT: Keep it visible!
+            binding.bigCountdownView.visibility = View.VISIBLE
 
-            // 2. Show grace timer BELOW table
+            // 2. Show grace timer below table
             graceTimerView.visibility = View.VISIBLE
             updateGraceTimerDisplay(graceSeconds, prayer)
 
@@ -713,105 +721,32 @@ class MainActivity : Activity() {
             binding.statusBar.text = "Next prayer: ${getActualNextPrayer(prayer)}"
         }
 
+        // Optional playback/notification trigger
+        if (triggerPlayback && remainingSeconds == null) {
+            // Place any playback/notification logic here
+            // e.g., playPrayerNotification(prayer)
+        }
+
         var secondsRemaining = graceSeconds
 
         gracePeriodTimer = object : Runnable {
             override fun run() {
                 if (secondsRemaining > 0) {
-                    // Use wall-clock to compute the second boundary, but schedule using uptimeMillis
                     val nowWall = System.currentTimeMillis()
                     val ms = (nowWall % 1000).toInt()
 
-                    // Update display using the current remaining seconds
                     updateGraceTimerDisplay(secondsRemaining, prayer)
 
                     // Update status bar
                     val actualNextPrayer = getActualNextPrayer(prayer)
 
-                    // Decrement for the next tick
                     secondsRemaining--
 
-                    // Compute millis until the next exact second boundary (1..1000)
                     val millisUntilNextSecond = max(1, 1000 - ms)
-
-                    // Schedule using uptimeMillis to avoid wall-clock jumps affecting timing
                     val nextUptime = SystemClock.uptimeMillis() + millisUntilNextSecond
                     handler.postAtTime(this, nextUptime)
 
                 } else {
-                    // No more seconds: end immediately and do not schedule another tick
-                    endGracePeriod()
-                }
-            }
-        }
-
-        handler.post(gracePeriodTimer as Runnable)
-    }
-
-    private fun restoreGracePeriod(prayer: String, remainingSeconds: Int) {
-        appendLine("=== RESTORE GRACE PERIOD FOR $prayer ===")
-        appendLine("Remaining seconds: $remainingSeconds")
-
-        // Set global grace state
-        currentGracePrayer = prayer
-        graceEndTime = System.currentTimeMillis() + (remainingSeconds * 1000)
-
-        appendLine("=== GRACE PERIOD RESTORED ===")
-        appendLine("Prayer: $prayer, Remaining: $remainingSeconds seconds")
-        appendLine("Will end at: ${SimpleDateFormat("HH:mm:ss").format(Date(graceEndTime))}")
-
-        // Stop prayer countdown (but don't hide the view)
-        nextPrayerTimer?.let { handler.removeCallbacks(it) }
-        nextPrayerTimer = null
-
-        // UPDATE: Show "Mosque-Icon Prayer TIME" in prayer timer position
-        // and show grace timer below table
-        runOnUiThread {
-            // 1. REPLACE prayer timer with "🕌 Prayer TIME" (same position, stays visible)
-            binding.bigCountdownView.text = "🕌\n$prayer TIME"
-            binding.bigCountdownView.setTextColor(Color.GREEN)
-            binding.bigCountdownView.visibility = View.VISIBLE  // IMPORTANT: Keep it visible!
-
-            // 2. Show grace timer BELOW table
-            graceTimerView.visibility = View.VISIBLE
-            updateGraceTimerDisplay(remainingSeconds, prayer)
-
-            // 3. Force UI to show current prayer tab
-            activePrayer = prayer
-            updateTabStyles()
-            showPrayer(activePrayer)
-
-            // 4. Update status bar
-            binding.statusBar.text = "Next prayer: ${getActualNextPrayer(prayer)}"
-        }
-
-        var secondsRemaining = remainingSeconds
-
-        gracePeriodTimer = object : Runnable {
-            override fun run() {
-                if (secondsRemaining > 0) {
-                    // Use wall-clock to compute the second boundary, but schedule using uptimeMillis
-                    val nowWall = System.currentTimeMillis()
-                    val ms = (nowWall % 1000).toInt()
-
-                    // Update display using the current remaining seconds
-                    updateGraceTimerDisplay(secondsRemaining, prayer)
-
-                    // Update status bar
-                    val actualNextPrayer = getActualNextPrayer(prayer)
-
-                    // Decrement for the next tick
-                    secondsRemaining--
-
-                    // Compute millis until the next exact second boundary (1..1000)
-                    val millisUntilNextSecond = max(1, 1000 - ms)
-
-                    // Schedule using uptimeMillis to avoid wall-clock jumps affecting timing
-                    val nextUptime = SystemClock.uptimeMillis() + millisUntilNextSecond
-                    handler.postAtTime(this, nextUptime)
-
-                } else {
-                    // No more seconds: end immediately and do not schedule another tick
                     endGracePeriod()
                 }
             }
@@ -959,7 +894,7 @@ class MainActivity : Activity() {
         // Test 2: Start grace period
         handler.postDelayed({
             appendLine("Starting grace period in 3 seconds...")
-            startGracePeriod("Dhuhr")
+            startOrResotreGracePeriod("Dhuhr")
         }, 3000)
     }
 
@@ -2440,7 +2375,7 @@ class MainActivity : Activity() {
             val secondsRemaining = ((graceEndTime - System.currentTimeMillis()) / 1000).toInt()
             if (secondsRemaining > 0) {
                 // Re-start the grace period with the time remaining
-                restoreGracePeriod(currentGracePrayer!!, secondsRemaining)
+                startOrResotreGracePeriod(currentGracePrayer!!, secondsRemaining)
             }
         }
 

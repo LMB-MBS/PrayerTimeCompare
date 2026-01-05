@@ -12,6 +12,10 @@ import android.os.Environment
 import android.os.Looper
 import android.provider.MediaStore
 
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ImageSpan
+
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -79,6 +83,8 @@ import android.widget.FrameLayout
 import androidx.core.content.ContextCompat
 import com.abang.prayertimecompare.databinding.ActivityMainBinding
 import kotlin.apply
+import kotlin.text.get
+import kotlin.text.set
 import kotlin.text.toInt
 
 
@@ -306,10 +312,15 @@ class MainActivity : Activity() {
             when (intent.action) {
                 ACTION_PLAYBACK_STARTED -> {
                     runOnUiThread {
-                        // Set state without showing a dialog
                         currentPlayingPrayer = prayer
                         setSpeakerIconColor(prayer, Colors.RED)
                         appendLine("Playback started for $prayer. Icon set to RED.")
+
+                        // Use GRACE_PERIOD priority (3) - higher than PRAYER_COUNTDOWN (1)
+                        updateStatusBarWithPriority(
+                            "Tap red speaker to stop Azan & disable it",
+                            STATUS_BAR_PRIORITIES.GRACE_PERIOD
+                        )
                     }
                 }
                 ACTION_PLAYBACK_STOPPED -> {
@@ -319,6 +330,7 @@ class MainActivity : Activity() {
                             setSpeakerIconColor(prayer, Colors.GREEN)
                             currentPlayingPrayer = null
                             appendLine("Playback stopped for $prayer via notification. Icon set to GREEN.")
+                            clearStatusBarIfLowerPriority(STATUS_BAR_PRIORITIES.GRACE_PERIOD)
                         }
                     }
                 }
@@ -749,9 +761,13 @@ class MainActivity : Activity() {
             updateTabStyles()
             activePrayer?.let { showPrayer(it) }
 
-            // 4. Update status bar
-            binding.statusBar.text = "Next prayer: ${getActualNextPrayer(prayer)}"
-        }
+            // 4. Update status bar: Only update if Azan is NOT playing
+            if (currentPlayingPrayer == null) {
+                binding.statusBar.text = "Next prayer: ${getActualNextPrayer(prayer)}"
+            } else {
+                binding.statusBar.text = "Tap red speaker to stop Azan & disable it"
+            }
+            }
 
         // Optional playback/notification trigger
         if (triggerPlayback && remainingSeconds == null) {
@@ -770,8 +786,14 @@ class MainActivity : Activity() {
                     updateGraceTimerDisplay(secondsRemaining, prayer)
 
                     // Update status bar
-                    val actualNextPrayer = getActualNextPrayer(prayer)
-
+                    // Update status bar ONLY if no Azan is playing
+                    if (currentPlayingPrayer == null) {
+                        val actualNextPrayer = getActualNextPrayer(prayer)
+                        updateStatusBarWithPriority(
+                            "Next prayer: $actualNextPrayer",
+                            STATUS_BAR_PRIORITIES.PRAYER_COUNTDOWN
+                        )
+                    }
                     secondsRemaining--
 
                     val millisUntilNextSecond = max(1, 1000 - ms)
@@ -1018,13 +1040,15 @@ class MainActivity : Activity() {
             // Attach click listener
             iconView.setOnClickListener {
                 val playing = currentPlayingPrayer
-                if (playing == prayer) {
+                val wasPlaying = (playing == prayer) // Capture state BEFORE any changes
+
+                if (wasPlaying) {
                     // CASE 1: Azan is currently playing for THIS prayer (icon is RED).
                     // Stop playback and disable the alarm (icon becomes WHITE).
                     val serviceIntent = Intent(this, PrayerNotificationService::class.java).apply {
                         action = "STOP_AZAN"
                     }
-                    startService(serviceIntent) // This will stop the media player in the service.
+                    startService(serviceIntent)
 
                     // Manually update UI state immediately.
                     setSpeakerIconColor(prayer, Colors.WHITE)
@@ -1033,6 +1057,14 @@ class MainActivity : Activity() {
                     val prefs = getSharedPreferences("prayer_alarms", MODE_PRIVATE)
                     prefs.edit().putBoolean(prayer, false).apply()
                     appendLine("Playback stopped for $prayer via icon click. Alarm set to OFF. Icon set to WHITE.")
+
+                    // Show status bar message with high priority
+                    setStatusBarAzanDisabled()
+
+                    // Auto-clear after 10 seconds
+                    handler.postDelayed({
+                        clearStatusBarIfLowerPriority(STATUS_BAR_PRIORITIES.MANUAL_OVERRIDE)
+                    }, 10000)
 
                 } else {
                     // CASE 2: Azan is NOT playing for this prayer. Toggle alarm ON/OFF.
@@ -1044,6 +1076,7 @@ class MainActivity : Activity() {
                     appendLine("Alarm for $prayer: ${if (newState) "ON" else "OFF"}")
                 }
             }
+
 
             iconCell.addView(iconView)
             iconRow.addView(iconCell)
@@ -1141,6 +1174,22 @@ class MainActivity : Activity() {
         binding.topTabs.addView(iconRow)
         binding.topTabs.addView(tabRow)
 
+    }
+
+    private fun setStatusBarAzanDisabled() {
+        val icon = ContextCompat.getDrawable(this, R.drawable.ic_speaker_on)?.apply {
+            // ensure bounds are set so the icon appears
+            val size = 18.dpToPx()
+            setBounds(0, 0, size, size)
+            setTint(Colors.WHITE)
+        } ?: return
+
+        val text = "Azan Disabled. Tap  to enable."
+        val builder = SpannableStringBuilder(text)
+        val iconIndex = text.indexOf("  ") + 1 // position to place icon
+        builder.setSpan(ImageSpan(icon, ImageSpan.ALIGN_BOTTOM), iconIndex, iconIndex + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+
+        updateStatusBarWithPriority(builder, STATUS_BAR_PRIORITIES.MANUAL_OVERRIDE)
     }
 
 
@@ -3199,7 +3248,7 @@ class MainActivity : Activity() {
     }
 
     // StatusBar Priority Management helpers
-    private fun updateStatusBarWithPriority(message: String, priority: Int) {
+    private fun updateStatusBarWithPriority(message: CharSequence, priority: Int) {
         runOnUiThread {
             if (priority >= currentStatusBarPriority) {
                 binding.statusBar.text = message
@@ -3212,7 +3261,7 @@ class MainActivity : Activity() {
         runOnUiThread {
             if (priority >= currentStatusBarPriority) {
                 binding.statusBar.text = ""
-                currentStatusBarPriority = priority
+                currentStatusBarPriority = STATUS_BAR_PRIORITIES.NORMAL
             }
         }
     }

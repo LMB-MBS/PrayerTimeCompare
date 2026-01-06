@@ -1,4 +1,4 @@
-package com.abang.prayertimecompare
+package com.abang.prayerzoneslite
 
 import org.junit.Test
 

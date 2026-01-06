@@ -1,12 +1,10 @@
-import org.gradle.kotlin.dsl.getByName
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
 }
 
 android {
-    namespace = "com.abang.prayertimecompare"
+    namespace = "com.abang.prayerzoneslite"
     compileSdk {
         version = release(36)
     }
@@ -16,11 +14,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.abang.prayertimecompare"
+        applicationId = "com.abang.prayerzoneslite"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
-        versionName = "1.99"
+        versionName = "2.00"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -82,7 +80,7 @@ tasks.register("pushApkToPhone") {
 
     doLast {
         // Adjusted to your personalized APK name
-        val apkPath = file("$projectDir/build/outputs/apk/debug/PrayerTimeCompare-1.25-debug.apk")
+        val apkPath = file("$projectDir/build/outputs/apk/debug/prayerzoneslite-1.25-debug.apk")
         val adbPath = "D:/Android/Sdk/platform-tools/adb.exe"
 
         println("📦 Built APK: ${apkPath.absolutePath}")

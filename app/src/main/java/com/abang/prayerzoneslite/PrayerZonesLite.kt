@@ -1,4 +1,4 @@
-package com.abang.prayertimecompare
+package com.abang.prayerzoneslite
 
 import android.annotation.SuppressLint
 import android.app.Activity
@@ -11,6 +11,10 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Looper
 import android.provider.MediaStore
+
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ImageSpan
 
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -38,7 +42,6 @@ import kotlin.math.max
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import org.json.JSONObject
 import java.io.File
@@ -67,23 +70,18 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 
 import android.util.Log
-import android.widget.FrameLayout
 import android.widget.ImageView
-import android.widget.TableLayout
 import android.widget.TableRow
 import androidx.core.net.toUri
 import kotlin.math.sqrt
 
 import androidx.core.widget.TextViewCompat
 import android.util.TypedValue
+import android.view.ViewGroup
 
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import com.abang.prayertimecompare.databinding.ActivityMainBinding
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
-import kotlin.apply
-import kotlin.or
-import kotlin.text.compareTo
+import com.abang.prayerzoneslite.databinding.ActivityMainBinding
+
 
 
 // -------------------------------
@@ -117,6 +115,14 @@ data class PrayerSet(
     val isha: String? = null
 )
 
+// Mosque Location data structure for selection architecture
+data class MosqueLocation(
+    val countryCode: String,
+    val townName: String,
+    val mosqueName: String,
+    val lineIdentifier: String
+)
+
 object Prayers {
     val ORDER = listOf("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha")
 }
@@ -128,13 +134,10 @@ private enum class Method12Format {
     MONTH_KEYED, DATE_KEYED
 }
 
-private data class ParseResult<T>(val data: T, val errors: List<String> = emptyList())
 
 object Colors {
     val BG = Color.BLACK
-    val TITLE_BG = Color.DKGRAY
     val TITLE_TEXT = Color.WHITE
-    val TAB_ACTIVE = Color.parseColor("#00BCD4")
     val TAB_INACTIVE = Color.GRAY
     val LOG_TEXT = Color.LTGRAY
     val GREEN = Color.parseColor("#00AA00")
@@ -155,7 +158,7 @@ private var nextPrayerTimer: Runnable? = null
 private var dataReady = false
 
 // Top-level PlaybackService for android 13+ so app shows up in the system media controls
-// In PrayerTimeCompare.kt
+// In PrayerZonesLite.kt
 class PlaybackService : Service() {
 
     private lateinit var mediaSession: MediaSession
@@ -229,6 +232,7 @@ class PlaybackService : Service() {
         } else {
             startForeground(1, notification)
         }
+
     }
 
     private fun getActionIntent(action: String): PendingIntent {
@@ -281,7 +285,6 @@ class PlaybackService : Service() {
 // Map now stores label, icon view, and icon container
 private val prayerTabs = mutableMapOf<String, Triple<TextView, ImageView, LinearLayout>>()
 
-private var isPlaying: Boolean = false
 
 private lateinit var binding: ActivityMainBinding
 
@@ -291,14 +294,15 @@ private val prayerAlarmEnabled = mutableMapOf<String, Boolean>()
 
 private var tabRowLayout: LinearLayout? = null
 
-private const val ACTION_PLAYBACK_STARTED = "com.abang.prayertimecompare.PLAYBACK_STARTED"
-private const val ACTION_PLAYBACK_STOPPED = "com.abang.prayertimecompare.PLAYBACK_STOPPED"
+private const val ACTION_PLAYBACK_STARTED = "com.abang.prayerzoneslite.PLAYBACK_STARTED"
+private const val ACTION_PLAYBACK_STOPPED = "com.abang.prayerzoneslite.PLAYBACK_STOPPED"
 
+private var activePrayer: String? = null
 
 // -------------------------------
 // MainActivity
 // -------------------------------
-class MainActivity : Activity() {
+class PrayerZonesLite : Activity() {
 
     private val playbackStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -307,10 +311,15 @@ class MainActivity : Activity() {
             when (intent.action) {
                 ACTION_PLAYBACK_STARTED -> {
                     runOnUiThread {
-                        // Set state without showing a dialog
                         currentPlayingPrayer = prayer
                         setSpeakerIconColor(prayer, Colors.RED)
                         appendLine("Playback started for $prayer. Icon set to RED.")
+
+                        // Use GRACE_PERIOD priority (3) - higher than PRAYER_COUNTDOWN (1)
+                        updateStatusBarWithPriority(
+                            "Tap red speaker to stop Azan & disable it",
+                            STATUS_BAR_PRIORITIES.GRACE_PERIOD
+                        )
                     }
                 }
                 ACTION_PLAYBACK_STOPPED -> {
@@ -320,6 +329,7 @@ class MainActivity : Activity() {
                             setSpeakerIconColor(prayer, Colors.GREEN)
                             currentPlayingPrayer = null
                             appendLine("Playback stopped for $prayer via notification. Icon set to GREEN.")
+                            clearStatusBarIfLowerPriority(STATUS_BAR_PRIORITIES.GRACE_PERIOD)
                         }
                     }
                 }
@@ -327,16 +337,26 @@ class MainActivity : Activity() {
         }
     }
 
-
+    // Debug mode long-press handler 5-seconds
+    private val debugHandler = Handler(Looper.getMainLooper())
+    private val debugLongPressRunnable = Runnable {
+        DEBUG_MODE = !DEBUG_MODE
+        runOnUiThread {
+            Toast.makeText(this, "Debug Mode ${if (DEBUG_MODE) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
+        }
+        if (DEBUG_MODE) {
+            enterDebugMode()
+        } else {
+            exitDebugMode()
+        }
+    }
     // Status Bar Priority Management
     private var currentStatusBarPriority = 0
     private val STATUS_BAR_PRIORITIES = object {
         val NORMAL = 0          // Default/clear
         val PRAYER_COUNTDOWN = 1  // Lowest - redundant with big display
-        val AUTO_SWITCH = 2      // "Auto-switched to..."
         val GRACE_PERIOD = 3     // "Switching to... in Xs" (HIGH)
         val MANUAL_OVERRIDE = 4  // "Returning to auto-mode..." (HIGHEST)
-        val ERROR = 5           // Error messages
     }
 
     // 🔹 Companion object: shared log buffer + static logging
@@ -374,7 +394,6 @@ class MainActivity : Activity() {
     }
     private lateinit var graceTimerView: TextView
 
-    private var currentGracePeriodMinutes = 1 // Start with 1 min for testing
     private var isBlinkingActive = false
     private var blinkState = false
     private val blinkHandler = Handler(Looper.getMainLooper())
@@ -393,15 +412,8 @@ class MainActivity : Activity() {
     private var currentPlayingPrayer: String? = null
     private var returnCountdownHandler: Handler? = null
     private var returnCountdownTask: Runnable? = null
-    private var gracePeriodMinutes = 1 // Configurable for Stage 2
     private var isAutoMode = true
     private var currentOverridePrayer: String? = null
-    private var prayerHighlightHandler = Handler(Looper.getMainLooper())
-    private val prayerHighlightTask = object : Runnable {
-        override fun run() {
-            prayerHighlightHandler.postDelayed(this, 30000) // Check every 30 seconds
-        }
-    }
 
     private lateinit var workingBase: File
     private lateinit var backupRoot: File
@@ -416,8 +428,6 @@ class MainActivity : Activity() {
     private val coeffsMap: MutableMap<String, DoubleArray> = mutableMapOf() // prayer -> coeffs
     private val m85Predictions: MutableMap<String, Map<String, String>> = mutableMapOf() // prayer -> (date->time)
 
-    private var hasErrors = false
-    private val errorMessages = StringBuilder()
     // Add a debug mode flag (you could make this configurable)
     private var DEBUG_MODE = false
     private var debugTapCount = 0
@@ -443,14 +453,14 @@ class MainActivity : Activity() {
                 if (currentPrayer != null && gracePeriodTimer == null) {
                     // New prayer time detected - start grace period
                     appendLine("Auto-detected: $currentPrayer time starting")
-                    startGracePeriod(currentPrayer)
+                    startOrResotreGracePeriod(currentPrayer)
                 } else if (currentPrayer == null && gracePeriodTimer == null) {
                     // Not in grace period - check normal progression
                     val (nextPrayer, _) = getNextPrayerAndTime()
                     if (nextPrayer != activePrayer) {
                         activePrayer = nextPrayer
                         updateTabStyles()
-                        showPrayer(activePrayer)
+                        activePrayer?.let { showPrayer(it) }
                         appendLine("Normal progression to: $nextPrayer")
                     }
                 }
@@ -460,6 +470,14 @@ class MainActivity : Activity() {
         }
     }
 
+    // Which prayer is next in auto-mode (nullable until computed)
+    private var nextPrayer: String? = null
+
+    // Manual mode flag (true when user clicks a tab; active for 20s)
+    private var manualModeActive: Boolean = false
+
+    // Epoch millis when manual mode should end (now + 20_000)
+    private var manualModeEndTime: Long = 0L
 
     // -----------------------------------------------------
     // Data Maps
@@ -472,22 +490,40 @@ class MainActivity : Activity() {
     // -----------------------------------------------------
     private var sourceM12: String = "ERROR"   // CACHE / INTERNET / ERROR
     private var sourceM99: String = "ERROR"
-    private val sourceAPI = mutableMapOf<Int, String>() // for method 00–12
 
-    private var activePrayer: String = "Fajr"
+    // -----------------------------------------------------
+    // Current Mosque Selection
+    // -----------------------------------------------------
+    private val currentMosque = MosqueLocation(
+        countryCode = "FR",
+        townName = "Fontenay-sous-Bois",
+        mosqueName = "Al-Ikhlas",
+        lineIdentifier = "M"
+    )
+
+    private var activePrayer: String? = null
 
     @SuppressLint("SetTextI18n")
     // --- Activity lifecycle entry point ---
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+
         // --- Edge-to-edge display setup --- (important for modern UI)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+
+
 
         // --- Initialize ViewBinding ---
         binding = ActivityMainBinding.inflate(layoutInflater)
         graceTimerView = binding.graceTimerView // or findViewById(R.id.graceTimerView)
         setContentView(binding.root)
+
+        // 🔹 Apply initial text size from XML
+        val initialSizeSp = resources.getDimension(R.dimen.countdown_text_size) / resources.displayMetrics.scaledDensity
+        binding.bigCountdownView.setTextSize(TypedValue.COMPLEX_UNIT_SP, initialSizeSp)
+
+        testDimensLoading()
 
         // Apply system bar insets (top + bottom) as padding
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
@@ -495,6 +531,8 @@ class MainActivity : Activity() {
             view.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
+        // Initial
+        //updateCountdownFrameHeight()
 
         // Register explicit broadcast receiver (no LocalBroadcastManager)
         // Use ContextCompat for backward compatibility
@@ -520,7 +558,7 @@ class MainActivity : Activity() {
         }
 
         // --- Initialize UI using binding ---
-        binding.title.text = "PrayerTimeCompare $appVersion"
+        binding.toolbar.title = "Prayerzoneslite $appVersion"
         binding.rootLayout.setBackgroundColor(Colors.BG)
 
         // Settings icon click
@@ -547,9 +585,9 @@ class MainActivity : Activity() {
 
 
         buildTabs()         // Pass binding.topTabs instead of old variable
+        // Defer updateTabStyles() until onRestoreInstanceState or data ready
         setupCountdownArea()
         setupDebugToggle()
-        setupTitleLongPress()
 
         // Log initial configuration
         appendLine("Initial grace config: ${getGracePeriodConfig()}")
@@ -568,18 +606,25 @@ class MainActivity : Activity() {
                 scheduleNextPrayerNotification()
                 startSynchronizedAutoChecker()
 
+                // Compute next prayer only once here
                 val (detectedPrayer, _) = getNextPrayerAndTime()
 
                 runOnUiThread {
+                    // Remove the if(isRestoring) check - ALWAYS render when data is ready
                     activePrayer = detectedPrayer
-                    updateTabStyles()
-                    renderTableFromBuffer()
                     dataReady = true
-                    appendLine("Auto-detected prayer: $activePrayer")
+
+                    // Always update UI when data is loaded
+                    renderTableFromBuffer()
+                    updateTabStyles()
+
+                    appendLine("Active prayer: $activePrayer")
                     binding.statusBar.text = ""
                     currentStatusBarPriority = STATUS_BAR_PRIORITIES.NORMAL
                     startAdaptiveSynchronizedCountdown()
                 }
+
+
 
             } catch (e: Exception) {
                 appendLine("CRASH: ${e.message}")
@@ -587,6 +632,7 @@ class MainActivity : Activity() {
                 runOnUiThread { showLoadingPlaceholder() }
             }
         }.start()
+        debugRotationState()
     }
 
 
@@ -611,17 +657,23 @@ class MainActivity : Activity() {
         icon.setColorFilter(color)
     }
 
+    private fun resolvePrayer(): String? {
+        return activePrayer   // may be null until restored or computed
+    }
+
     private fun renderInitialTable() {
-        // Use whatever your current active prayer is, or a placeholder
-        val initialPrayer = activePrayer ?: "Fajr"
-        showPrayer(initialPrayer)
+        resolvePrayer()?.let { prayer ->
+            showPrayer(prayer)          // safe, non‑null
+        } ?: showLoadingPlaceholder()   // fallback if null
     }
 
     private fun renderTableFromBuffer() {
-        // Reuse the same renderer with the current active prayer
-        val prayer = activePrayer ?: "Fajr"
-        showPrayer(prayer)
+        resolvePrayer()?.let { prayer ->
+            showPrayer(prayer)          // safe render when prayer is known
+        } ?: showLoadingPlaceholder()   // neutral fallback if still null
     }
+
+
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -647,49 +699,75 @@ class MainActivity : Activity() {
     }
 
 
-    // Updated startGracePeriod() with your tuning
-    private fun startGracePeriod(prayer: String) {
-        // Get user's preference for this prayer
-        val graceConfig = getGracePeriodConfig()
-        val graceMinutes = graceConfig[prayer] ?: 1// Default to 1 if somehow missing
+    private fun startOrResotreGracePeriod(
+        prayer: String,
+        remainingSeconds: Int? = null,
+        triggerPlayback: Boolean = true
+    ) {
+        // Determine duration
+        val graceSeconds: Int = if (remainingSeconds != null) {
+            remainingSeconds
+        } else {
+            val graceConfig = getGracePeriodConfig()
+            val graceMinutes = graceConfig[prayer] ?: 1 // Default to 1 if missing
+            graceMinutes * 60
+        }
 
-        // Calculate grace period duration
-        val graceSeconds = graceMinutes * 60
-
-        appendLine("=== START GRACE PERIOD FOR $prayer ===")
-        appendLine("User preference: $graceMinutes minutes (from settings)")
+        appendLine("=== BEGIN GRACE PERIOD FOR $prayer ===")
+        if (remainingSeconds == null) {
+            appendLine("User preference: ${graceSeconds / 60} minutes (from settings)")
+        } else {
+            appendLine("Restored remaining: $graceSeconds seconds")
+        }
 
         // Set global grace state
         currentGracePrayer = prayer
         graceEndTime = System.currentTimeMillis() + (graceSeconds * 1000)
 
-        appendLine("=== GRACE PERIOD STARTED ===")
-        appendLine("Prayer: $prayer, Duration: $graceMinutes minutes")
+        appendLine("=== GRACE PERIOD ACTIVE ===")
+        appendLine("Prayer: $prayer, Duration: $graceSeconds seconds")
         appendLine("Will end at: ${SimpleDateFormat("HH:mm:ss").format(Date(graceEndTime))}")
 
         // Stop prayer countdown (but don't hide the view)
         nextPrayerTimer?.let { handler.removeCallbacks(it) }
         nextPrayerTimer = null
 
-        // UPDATE: Show "Mosque-Icon Prayer TIME" in prayer timer position
-        // and show grace timer below table
+        // UI updates
         runOnUiThread {
-            // 1. REPLACE prayer timer with "🕌 Prayer TIME" (same position, stays visible)
-            binding.bigCountdownView.text = "🕌\n$prayer TIME"
-            binding.bigCountdownView.setTextColor(Color.GREEN)
-            binding.bigCountdownView.visibility = View.VISIBLE  // IMPORTANT: Keep it visible!
+            // 1. Replace prayer timer with "🕌 Prayer TIME"
+            val orientation = resources.configuration.orientation
+            binding.bigCountdownView.text = if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+                "🕌\n$prayer TIME"
+            } else {
+                "🕌 $prayer TIME"
+            }
 
-            // 2. Show grace timer BELOW table
+
+
+            binding.bigCountdownView.setTextColor(Color.GREEN)
+            binding.bigCountdownView.visibility = View.VISIBLE
+
+            // 2. Show grace timer below table
             graceTimerView.visibility = View.VISIBLE
             updateGraceTimerDisplay(graceSeconds, prayer)
 
             // 3. Force UI to show current prayer tab
             activePrayer = prayer
             updateTabStyles()
-            showPrayer(activePrayer)
+            activePrayer?.let { showPrayer(it) }
 
-            // 4. Update status bar
-            binding.statusBar.text = "Next prayer: ${getActualNextPrayer(prayer)}"
+            // 4. Update status bar: Only update if Azan is NOT playing
+            if (currentPlayingPrayer == null) {
+                binding.statusBar.text = "Next prayer: ${getActualNextPrayer(prayer)}"
+            } else {
+                binding.statusBar.text = "Tap red speaker to stop Azan & disable it"
+            }
+        }
+
+        // Optional playback/notification trigger
+        if (triggerPlayback && remainingSeconds == null) {
+            // Place any playback/notification logic here
+            // e.g., playPrayerNotification(prayer)
         }
 
         var secondsRemaining = graceSeconds
@@ -697,37 +775,31 @@ class MainActivity : Activity() {
         gracePeriodTimer = object : Runnable {
             override fun run() {
                 if (secondsRemaining > 0) {
-                    // Use wall-clock to compute the second boundary, but schedule using uptimeMillis
                     val nowWall = System.currentTimeMillis()
                     val ms = (nowWall % 1000).toInt()
 
-                    // Update display using the current remaining seconds
                     updateGraceTimerDisplay(secondsRemaining, prayer)
 
                     // Update status bar
-                    val actualNextPrayer = getActualNextPrayer(prayer)
-                    updateStatusBarWithPriority(
-                        "Switching to $actualNextPrayer in ${secondsRemaining}s",
-                        STATUS_BAR_PRIORITIES.GRACE_PERIOD
-                    )
-
-                    // Decrement for the next tick
+                    // Update status bar ONLY if no Azan is playing
+                    if (currentPlayingPrayer == null) {
+                        val actualNextPrayer = getActualNextPrayer(prayer)
+                        updateStatusBarWithPriority(
+                            "Next prayer: $actualNextPrayer",
+                            STATUS_BAR_PRIORITIES.PRAYER_COUNTDOWN
+                        )
+                    }
                     secondsRemaining--
 
-                    // Compute millis until the next exact second boundary (1..1000)
                     val millisUntilNextSecond = max(1, 1000 - ms)
-
-                    // Schedule using uptimeMillis to avoid wall-clock jumps affecting timing
                     val nextUptime = SystemClock.uptimeMillis() + millisUntilNextSecond
                     handler.postAtTime(this, nextUptime)
 
                 } else {
-                    // No more seconds: end immediately and do not schedule another tick
                     endGracePeriod()
                 }
             }
         }
-
 
         handler.post(gracePeriodTimer as Runnable)
     }
@@ -777,8 +849,6 @@ class MainActivity : Activity() {
         runOnUiThread {
             // Find the current prayer time cell in the table and blink it
             // This is a simplified implementation - we need to find the specific TextView
-            val dateFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-            val todayStr = dateFmt.format(Date())
 
             // We'll blink the status bar as a simple visual indicator for now
             // In next stage, we'll implement proper table cell blinking
@@ -818,7 +888,7 @@ class MainActivity : Activity() {
             // 3. Switch to next prayer IMMEDIATELY
             activePrayer = nextPrayer
             updateTabStyles()
-            showPrayer(activePrayer)
+            activePrayer?.let { showPrayer(it) }
 
             // 4. Update status bar
             // Show brief confirmation
@@ -838,58 +908,26 @@ class MainActivity : Activity() {
         appendLine("Grace period for $endedPrayer ended, switched to $activePrayer")
     }
 
-    private fun debugLayoutStructure() {
-        runOnUiThread {
-            appendLine("=== LAYOUT STRUCTURE ===")
-            appendLine("Root layout has ${binding.rootLayout.childCount} children:")
 
-            for (i in 0 until binding.rootLayout.childCount) {
-                val child = binding.rootLayout.getChildAt(i)
-                val visibility = if (child.visibility == View.VISIBLE) "VISIBLE"
-                else if (child.visibility == View.GONE) "GONE"
-                else "INVISIBLE"
-
-                appendLine("  [$i] ${child.javaClass.simpleName} - $visibility")
-
-                if (child == binding.bigCountdownView) {
-                    appendLine("     ^ THIS IS THE COUNTDOWN VIEW")
-                    appendLine("     Text: ${(child as TextView).text}")
-                    appendLine("     Height: ${child.height}")
-                }
-            }
-        }
+    private fun debugRotationState() {
+        appendLine("=== ROTATION DEBUG ===")
+        appendLine("dataReady: $dataReady")
+        appendLine("method99Map size: ${method99Map.size}")
+        appendLine("method12Map size: ${method12Map.size}")
+        appendLine("activePrayer: $activePrayer")
+        appendLine("contentTable child count: ${binding.contentTable.childCount}")
     }
-
     // Add this method for testing
-    private fun testCountdownNow() {
-        appendLine("=== MANUAL COUNTDOWN TEST ===")
-
-        // Test 1: Show countdown immediately
-        showBigCountdown(45, "Fajr")
-        debugLayoutStructure()
-
-        // Test 2: Start grace period
-        handler.postDelayed({
-            appendLine("Starting grace period in 3 seconds...")
-            startGracePeriod("Dhuhr")
-        }, 3000)
-    }
 
     // -------------------------------
     // UI helpers
     // -------------------------------
+
     private fun buildTabs() {
         binding.topTabs.removeAllViews()
         binding.topTabs.orientation = LinearLayout.VERTICAL
 
         val tabWeights = listOf(0.18f, 0.22f, 0.16f, 0.27f, 0.17f)
-        val tabColors = listOf(
-            Colors.TAB_ACTIVE,
-            Colors.TAB_INACTIVE,
-            Colors.TAB_INACTIVE,
-            Colors.TAB_INACTIVE,
-            Colors.TAB_INACTIVE
-        )
 
         val iconRowHeight = 24.dpToPx()
         val tabRowHeight = 36.dpToPx()
@@ -934,21 +972,23 @@ class MainActivity : Activity() {
 
             val iconView = ImageView(this)
 
-// Configure layout and appearance
+            // Configure layout and appearance
             iconView.layoutParams = LinearLayout.LayoutParams(20.dpToPx(), 20.dpToPx())
             iconView.setImageResource(R.drawable.ic_speaker_on)
             iconView.setColorFilter(if (isEnabled) Colors.GREEN else Colors.WHITE)
 
-// Attach click listener
+            // Attach click listener
             iconView.setOnClickListener {
                 val playing = currentPlayingPrayer
-                if (playing == prayer) {
+                val wasPlaying = (playing == prayer) // Capture state BEFORE any changes
+
+                if (wasPlaying) {
                     // CASE 1: Azan is currently playing for THIS prayer (icon is RED).
                     // Stop playback and disable the alarm (icon becomes WHITE).
                     val serviceIntent = Intent(this, PrayerNotificationService::class.java).apply {
                         action = "STOP_AZAN"
                     }
-                    startService(serviceIntent) // This will stop the media player in the service.
+                    startService(serviceIntent)
 
                     // Manually update UI state immediately.
                     setSpeakerIconColor(prayer, Colors.WHITE)
@@ -957,6 +997,14 @@ class MainActivity : Activity() {
                     val prefs = getSharedPreferences("prayer_alarms", MODE_PRIVATE)
                     prefs.edit().putBoolean(prayer, false).apply()
                     appendLine("Playback stopped for $prayer via icon click. Alarm set to OFF. Icon set to WHITE.")
+
+                    // Show status bar message with high priority
+                    setStatusBarAzanDisabled()
+
+                    // Auto-clear after 10 seconds
+                    handler.postDelayed({
+                        clearStatusBarIfLowerPriority(STATUS_BAR_PRIORITIES.MANUAL_OVERRIDE)
+                    }, 10000)
 
                 } else {
                     // CASE 2: Azan is NOT playing for this prayer. Toggle alarm ON/OFF.
@@ -969,6 +1017,7 @@ class MainActivity : Activity() {
                 }
             }
 
+
             iconCell.addView(iconView)
             iconRow.addView(iconCell)
 
@@ -977,7 +1026,7 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, weight)
-                setBackgroundColor(tabColors[index])
+                setBackgroundColor(Colors.TAB_INACTIVE)
             }
 
             val label = TextView(this).apply {
@@ -1022,13 +1071,15 @@ class MainActivity : Activity() {
 
                     // Return to auto-mode
                     isAutoMode = true
+                    manualModeActive = false   // <-- reset manual mode
                     activePrayer = trueCurrentPrayer
-                    updateTabStyles()
-                    showPrayer(activePrayer)
 
-                    // RESTART the main prayer countdown timer
+                    activePrayer?.let { showPrayer(it) }
+
+                    // Restart the main prayer countdown timer
                     startSimpleCountdown()
 
+                    updateTabStyles()          // <-- recompute styles
                     return@setOnClickListener
                 }
 
@@ -1036,15 +1087,20 @@ class MainActivity : Activity() {
                 appendLine("Manual override to: $clickedPrayer")
 
                 // This action implies we are no longer in auto mode.
-                // The startReturnCountdown() function will handle setting isAutoMode = false
-                // and starting the 20s timer.
+                isAutoMode = false
                 activePrayer = clickedPrayer
-                updateTabStyles()
+
+                // Start manual mode window (20 seconds)
+                manualModeActive = true
+                manualModeEndTime = System.currentTimeMillis() + 20_000
+
                 showPrayer(clickedPrayer)
                 appendLine("Manual selection: $clickedPrayer (auto-return in 20s)")
 
                 // Start 20s countdown to return to auto
                 startReturnCountdown()
+
+                updateTabStyles()              // <-- recompute styles immediately
             }
 
 
@@ -1052,13 +1108,28 @@ class MainActivity : Activity() {
             tabRow.addView(tabCell)
 
             // Store all pieces for unified styling
-            prayerTabs[prayer] = Triple(label, iconView, iconCell)
+            prayerTabs[prayer] = Triple(label, iconView, tabCell)
         }
 
         binding.topTabs.addView(iconRow)
         binding.topTabs.addView(tabRow)
 
-        updateTabStyles()
+    }
+
+    private fun setStatusBarAzanDisabled() {
+        val icon = ContextCompat.getDrawable(this, R.drawable.ic_speaker_on)?.apply {
+            // ensure bounds are set so the icon appears
+            val size = 18.dpToPx()
+            setBounds(0, 0, size, size)
+            setTint(Colors.WHITE)
+        } ?: return
+
+        val text = "Azan Disabled. Tap  to enable."
+        val builder = SpannableStringBuilder(text)
+        val iconIndex = text.indexOf("  ") + 1 // position to place icon
+        builder.setSpan(ImageSpan(icon, ImageSpan.ALIGN_BOTTOM), iconIndex, iconIndex + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+
+        updateStatusBarWithPriority(builder, STATUS_BAR_PRIORITIES.MANUAL_OVERRIDE)
     }
 
 
@@ -1072,6 +1143,10 @@ class MainActivity : Activity() {
         isAutoMode = false
         currentOverridePrayer = activePrayer
         userOverrideExpiry = System.currentTimeMillis() + 20_000L
+
+        // Also set manual mode flags
+        manualModeActive = true
+        manualModeEndTime = userOverrideExpiry
 
         // Ensure readable status bar styling
         binding.statusBar.setBackgroundColor(Color.DKGRAY)
@@ -1101,9 +1176,21 @@ class MainActivity : Activity() {
                     returnCountdownHandler?.postDelayed(this, 1000L)
                 } else {
                     appendLine("Return countdown finished; switching back to auto-mode.")
+
+                    // Reset flags
                     isAutoMode = true
+                    manualModeActive = false
+                    manualModeEndTime = 0L
                     currentOverridePrayer = null
+
+                    // Return to auto-mode prayer
                     returnToCurrentPrayer()
+
+                    // Recompute tab styles immediately
+                    updateTabStyles()
+
+                    // Clear status bar
+                    clearStatusBarIfLowerPriority(STATUS_BAR_PRIORITIES.NORMAL)
                 }
             }
         }
@@ -1143,7 +1230,7 @@ class MainActivity : Activity() {
             currentOverridePrayer = null
             userOverrideExpiry = 0
             updateTabStyles()
-            showPrayer(activePrayer)
+            activePrayer?.let { showPrayer(it) }
         } else {
             appendLine("Already on correct tab: $trueCurrentPrayer")
             isAutoMode = true
@@ -1156,35 +1243,78 @@ class MainActivity : Activity() {
         appendLine("Prayer countdown timer restarted")
     }
 
+    // Helper to apply alpha to a color
+    fun Int.withAlpha(alpha: Int): Int =
+        Color.argb(alpha, Color.red(this), Color.green(this), Color.blue(this))
+
     private fun updateTabStyles() {
-        val tabRow = tabRowLayout ?: return
-        for (i in 0 until tabRow.childCount) {
-            val tabCell = tabRow.getChildAt(i) as? LinearLayout ?: continue
-            val prayer = Prayers.ORDER.getOrNull(i) ?: continue
-            val views = prayerTabs[prayer] ?: continue
-            val label = views.first
-            val iconCell = views.third
-            val isActive = (prayer == activePrayer)
+        val now = System.currentTimeMillis()
+        val manualStillActive = manualModeActive && now < manualModeEndTime
 
-            // Example styling: highlight active, dim inactive
-            val bgColor = if (isActive) Colors.TAB_ACTIVE else Colors.TAB_INACTIVE
-            tabCell.setBackgroundColor(bgColor)
-            iconCell.setBackgroundColor(bgColor)
+        val nextPrayerName = nextPrayer ?: getNextPrayerAndTime().first
+        val nextHighlight = Color.parseColor("#15656e") // green
+        val activeBg = Color.parseColor("#888888")      // light gray
+        val inactiveBg = Color.parseColor("#666666")    // dark gray
+        val white = Color.parseColor("#ffffff")
 
-            tabCell.alpha = if (isActive) 1f else 0.9f
-            label.setTextColor(Color.WHITE)
+        // Optionally expire manual mode if past end time
+        if (manualModeActive && !manualStillActive) {
+            manualModeActive = false
         }
-        // ensure icon colors reflect enabled/disabled when styles refresh
+
         prayerTabs.forEach { (prayer, triple) ->
+            val (label, icon, tabCell) = triple
+
+            when {
+                manualStillActive && prayer == activePrayer -> {
+                    tabCell.setBackgroundColor(activeBg)
+                    label.setTextColor(white.withAlpha(0xFF))
+                }
+                manualStillActive && prayer == nextPrayerName -> {
+                    tabCell.setBackgroundColor(nextHighlight)
+                    label.setTextColor(white.withAlpha(0xAD))
+                }
+                manualStillActive -> {
+                    tabCell.setBackgroundColor(inactiveBg)
+                    label.setTextColor(white.withAlpha(0xAD))
+                }
+                !manualStillActive && prayer == activePrayer && prayer == nextPrayerName -> {
+                    tabCell.setBackgroundColor(nextHighlight)
+                    label.setTextColor(white.withAlpha(0xFF))
+                }
+                !manualStillActive && prayer != activePrayer -> {
+                    tabCell.setBackgroundColor(inactiveBg)
+                    label.setTextColor(white.withAlpha(0xAD))
+                }
+                else -> {
+                    tabCell.setBackgroundColor(activeBg)
+                    label.setTextColor(white.withAlpha(0xFF))
+                }
+            }
+
+            // Icon coloring (unchanged)
             val isEnabled = prayerAlarmEnabled[prayer] == true
-            triple.second.setColorFilter(if (isEnabled) Colors.GREEN else Colors.WHITE)
+            val playingPrayer = currentPlayingPrayer
+            if (playingPrayer != null && prayer == playingPrayer) {
+                icon.setColorFilter(Colors.RED)
+            } else {
+                icon.setColorFilter(if (isEnabled) Colors.GREEN else Colors.WHITE)
+            }
         }
     }
+
 
     // In showPrayer(), replace status bar updates:
     private fun showPrayer(prayer: String) {
         appendLine("DEBUG showPrayer called for: $prayer")
         appendLine("DEBUG DEBUG_MODE: $DEBUG_MODE")
+
+        // Check if data maps are loaded
+        if (method99Map.isEmpty() || method12Map.isEmpty()) {
+            appendLine("DEBUG: Data not loaded yet, showing placeholder")
+            showLoadingPlaceholder()
+            return
+        }
 
         runOnUiThread {
             appendLine("DEBUG In showPrayer UI thread")
@@ -1209,7 +1339,7 @@ class MainActivity : Activity() {
                 // Force redraw
                 binding.contentTable.post {
                     binding.contentTable.invalidate()
-                    binding.tableContainer.fullScroll(View.FOCUS_UP)
+                    binding.contentScroll.fullScroll(View.FOCUS_UP)
                 }
             }
         }
@@ -1378,7 +1508,7 @@ class MainActivity : Activity() {
                 text = "--------"
                 setTextColor(Colors.LOG_TEXT)
                 gravity = Gravity.CENTER
-                setPadding(4.dpToPx(), 2.dpToPx(), 4.dpToPx(), 2.dpToPx())
+                setPadding(4.dpToPx(), 1.dpToPx(), 4.dpToPx(), 2.dpToPx())
                 layoutParams = TableRow.LayoutParams(
                     0,
                     TableRow.LayoutParams.WRAP_CONTENT,
@@ -1412,6 +1542,26 @@ class MainActivity : Activity() {
             val todayStr = dateFmt.format(Date())
             val numColumns = dates.size + 1
 
+            // ========== MOSQUE BRANDING ROW ==========
+            val brandingRow = TableRow(this)
+            val brandingCell = TextView(this).apply {
+                text = "${currentMosque.mosqueName}\n${currentMosque.townName}, ${currentMosque.countryCode}"
+                setTextColor(Colors.ORANGE)
+                setTypeface(null, Typeface.BOLD)
+                gravity = Gravity.CENTER
+                setPadding(12.dpToPx(), 8.dpToPx(), 12.dpToPx(), 8.dpToPx())
+                layoutParams = TableRow.LayoutParams(
+                    0,
+                    TableRow.LayoutParams.WRAP_CONTENT,
+                    numColumns.toFloat()
+                )
+            }
+            brandingRow.addView(brandingCell)
+            binding.contentTable.addView(brandingRow)
+
+            // ========== SEPARATOR ROW ==========
+            addSeparatorRow(numColumns)
+
             // ========== HEADER ROW ==========
             val headerRow = TableRow(this)
             headerRow.addView(createHeaderCell("Mth"))
@@ -1427,10 +1577,13 @@ class MainActivity : Activity() {
             addSeparatorRow(numColumns)
 
             // ========== DATA ROWS ==========
-            addPrayerDataRow("M12", prayer, dates, method12Map, sourceM12, nextPrayer, nextPrayerTime, todayStr)
-            addM85AccuracyRow(prayer, dates, nextPrayer, nextPrayerTime, todayStr)
-            addPrayerDataRow("M99", prayer, dates, method99Map, sourceM99, nextPrayer, nextPrayerTime, todayStr)
-            addDiffRow(prayer, dates, nextPrayer, nextPrayerTime, todayStr)
+            // Only display M99 data, renamed to mosque lineIdentifier "M"
+            addPrayerDataRow(currentMosque.lineIdentifier, prayer, dates, method99Map, sourceM99, nextPrayer, nextPrayerTime, todayStr)
+
+            // Hide M12, M85, and dt rows (keep backend logic intact)
+            // addPrayerDataRow("M12", prayer, dates, method12Map, sourceM12, nextPrayer, nextPrayerTime, todayStr)
+            // addM85AccuracyRow(prayer, dates, nextPrayer, nextPrayerTime, todayStr)
+            // addDiffRow(prayer, dates, nextPrayer, nextPrayerTime, todayStr)
 
             // ========== FINAL SEPARATOR ==========
             addSeparatorRow(numColumns)
@@ -1717,7 +1870,6 @@ class MainActivity : Activity() {
             if (coeffs != null && coeffs.isNotEmpty()) {
                 appendLine("Computing M85 predictions for $p using coefficients...")
                 val out = TreeMap<String, String>()
-                val prayerSetMap = TreeMap<String, PrayerSet>() // NEW: Build PrayerSet objects
 
                 for ((date, pset) in method12Map) {
                     val base = getPrayerTimeFromSet(pset, p)
@@ -2104,7 +2256,56 @@ class MainActivity : Activity() {
     // Display
     // -------------------------------
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
 
+        // Log for debugging
+        appendLine("Orientation changed to: ${if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) "Landscape" else "Portrait"}")
+
+        // 🔹 CRITICAL FIX: Use SP units, not PX
+        // Get the text size value in SP from resources
+        val sizeSp = resources.getDimension(R.dimen.countdown_text_size) / resources.displayMetrics.scaledDensity
+
+        // Set text size using SP units
+        binding.bigCountdownView.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
+
+        // Get margins
+        val topMargin = resources.getDimensionPixelSize(R.dimen.countdown_margin_top)
+        val bottomMargin = resources.getDimensionPixelSize(R.dimen.countdown_margin_bottom)
+
+        // Apply margins
+        (binding.bigCountdownView.layoutParams as ViewGroup.MarginLayoutParams).apply {
+            this.topMargin = topMargin
+            this.bottomMargin = bottomMargin
+        }
+
+        // Force layout update
+        binding.bigCountdownView.requestLayout()
+
+        // Also update the text to reflect orientation change
+        updateCountdownForOrientation()
+    }
+
+    private fun updateCountdownForOrientation() {
+        val orientation = resources.configuration.orientation
+
+        if (gracePeriodTimer != null && currentGracePrayer != null) {
+            // We're in grace period - show grace period text
+            binding.bigCountdownView.text = if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+                "🕌\n${currentGracePrayer} TIME"
+            } else {
+                "🕌 ${currentGracePrayer} TIME"
+            }
+        } else {
+            // Normal countdown mode - get current countdown state
+            val (nextPrayer, nextTimeStr) = getNextPrayerAndTime()
+            if (nextTimeStr != null) {
+                // Calculate and format
+                val secondsRemaining = calculateSecondsRemaining(nextTimeStr) ?: 0
+                updateCountdownWithSeconds(nextPrayer, secondsRemaining)
+            }
+        }
+    }
 
     private fun isDateColumnForNextPrayer(
         dateKey: String,
@@ -2121,6 +2322,12 @@ class MainActivity : Activity() {
     }
 
     private fun findActualNextPrayerDate(nextPrayer: String, nextPrayerTime: String?, dates: List<Date>): Date {
+        // 🔹 FIX: During grace period, force selection of Today (first date)
+        // This prevents the loop from skipping Today because the time is technically in the past
+        if (dates.isNotEmpty() && nextPrayer == currentGracePrayer) {
+            return dates[0]
+        }
+
         val dateFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val now = Calendar.getInstance()
 
@@ -2271,7 +2478,7 @@ class MainActivity : Activity() {
             if (DEBUG_MODE) {
                 val allLogsText = allLogs.values.joinToString("\n")
                 binding.debugTextView.text = allLogsText
-                binding.tableContainer.post { binding.tableContainer.fullScroll(View.FOCUS_DOWN) }
+                binding.tableContainer.post { binding.contentScroll.fullScroll(View.FOCUS_DOWN) }
             }
         }
     }
@@ -2287,21 +2494,35 @@ class MainActivity : Activity() {
             showLoadingPlaceholder()
         }
 
+        //updateCountdownFrameHeight()
+
         // Always refresh logs if debug mode is active
         if (DEBUG_MODE) {
             val allLogsText = allLogs.values.joinToString("\n")
             binding.debugTextView.text = allLogsText
-            binding.tableContainer.post { binding.tableContainer.fullScroll(View.FOCUS_DOWN) }
+            binding.tableContainer.post { binding.contentScroll.fullScroll(View.FOCUS_DOWN) }
         }
     }
 
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        // Save logs and active prayer
-        outState.putSerializable("logs", LinkedHashMap(allLogs))
-        outState.putString("activePrayer", activePrayer)
+
+        // Save data readiness
         outState.putBoolean("dataReady", dataReady)
+        outState.putString("activePrayer", activePrayer)
+
+        // Save current table state
+        outState.putString("currentPrayer", activePrayer)
+        outState.putBoolean("isAutoMode", isAutoMode)
+        outState.putLong("manualModeEndTime", manualModeEndTime)
+
+        // Save grace period state
+        outState.putLong("graceEndTime", graceEndTime)
+        outState.putString("currentGracePrayer", currentGracePrayer)
+
+        // Save playback state
+        outState.putString("currentPlayingPrayer", currentPlayingPrayer)
     }
 
 
@@ -2309,23 +2530,26 @@ class MainActivity : Activity() {
     override fun onRestoreInstanceState(savedInstanceState: Bundle) {
         super.onRestoreInstanceState(savedInstanceState)
 
-        // Restore logs
-        val restoredLogs = savedInstanceState.getSerializable("logs") as? LinkedHashMap<String, String>
-        if (restoredLogs != null) {
-            allLogs.clear()
-            allLogs.putAll(restoredLogs)
-        }
-
-        // Restore active prayer and dataReady flag
-        activePrayer = savedInstanceState.getString("activePrayer") ?: activePrayer
+        activePrayer = savedInstanceState.getString("activePrayer")
         dataReady = savedInstanceState.getBoolean("dataReady", false)
+        manualModeActive = savedInstanceState.getBoolean("manualModeActive", false)
+        manualModeEndTime = savedInstanceState.getLong("manualModeEndTime", 0L)
 
-        // Redraw depending on readiness
-        if (dataReady) {
-            renderTableFromBuffer()
+        // Recompute nextPrayer fresh
+        val (nextPrayerName, _) = getNextPrayerAndTime()
+        nextPrayer = nextPrayerName
+
+        // 🔑 Ensure maps are reloaded here if needed
+        //reloadPrayerMapsIfEmpty()
+
+        if (dataReady && activePrayer != null) {
+            showPrayer(activePrayer!!)   // rebuild table
+            updateTabStyles()            // recolor tabs
         } else {
             showLoadingPlaceholder()
         }
+        debugRotationState()
+        //applyCountdownDimens()
     }
 
     private fun dayOfYearFromDate(s: String, year: Int): Int {
@@ -2351,54 +2575,23 @@ class MainActivity : Activity() {
     private fun Int.dpToPx(): Int = (this * resources.displayMetrics.density).toInt()
 
     // Enhanced debug toggle with visual feedback
+    @SuppressLint("ClickableViewAccessibility")
     private fun setupDebugToggle() {
-        val title = binding.rootLayout.getChildAt(0) as? TextView
-        title?.setOnClickListener {
-            // If already in debug mode, ONLY allow tab tapping to exit
-            if (DEBUG_MODE) {
-                // In debug mode, tab clicks exit, not title clicks
-                return@setOnClickListener
+        binding.toolbar.setOnTouchListener { _, event ->
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    // Start a 5-second timer when the user presses down
+                    debugHandler.postDelayed(debugLongPressRunnable, 5000)
+                    true // Consume the event
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    // Cancel the timer if the user lifts their finger before 5 seconds
+                    debugHandler.removeCallbacks(debugLongPressRunnable)
+                    true // Consume the event
+                }
+                else -> false
             }
-            // Normal 5-tap activation ONLY when not in debug mode
-            debugTapCount++
-
-            // Phase 1: Hidden (0-2 taps) - no feedback
-            if (debugTapCount < 3) {
-                handler.removeCallbacks(resetDebugCounterTask)
-                handler.postDelayed(resetDebugCounterTask, 3000)
-                return@setOnClickListener
-            }
-
-            // Phase 2: Countdown revealed (3-4 taps)
-            if (debugTapCount in 3..4) {
-                binding.statusBar.text = "Debug: ${debugTapCount}/5"
-                handler.removeCallbacks(resetDebugCounterTask)
-                handler.postDelayed({
-                    binding.statusBar.text = "Ready"
-                    debugTapCount = 0
-                }, 3000)
-                return@setOnClickListener
-            }
-
-            // Phase 3: Enter Debug Mode (5 taps)
-            if (debugTapCount >= 5) {
-                enterDebugMode()
-            }
-
         }
-        // ADD LONG PRESS LISTENER
-        title?.setOnLongClickListener {
-            appendLine("=== LONG PRESS DETECTED ===")
-            appendLine("Testing countdown system...")
-
-            // Show test menu or directly trigger
-            testCountdownNow()
-            debugLayoutStructure()  // Optional: show layout info
-
-            // Return true to indicate we handled the long press
-            true
-        }
-
     }
     private fun enterDebugMode() {
         DEBUG_MODE = true
@@ -2420,7 +2613,7 @@ class MainActivity : Activity() {
 
             // Auto-scroll to bottom to show the most recent entries
             binding.tableContainer.post {
-                binding.tableContainer.fullScroll(View.FOCUS_DOWN)
+                binding.contentScroll.fullScroll(View.FOCUS_DOWN)
             }
 
             graceTimerView.visibility = View.GONE
@@ -2444,8 +2637,20 @@ class MainActivity : Activity() {
         binding.statusBar.setBackgroundColor(Color.DKGRAY)
         binding.statusBar.setTextColor(Color.WHITE)
         binding.statusBar.text = ""
-        showPrayer(activePrayer)
+        activePrayer?.let { showPrayer(it) }
         startSimpleCountdown()
+    }
+
+    private fun testDimensLoading() {
+        val orientation = resources.configuration.orientation
+        val textSize = resources.getDimension(R.dimen.countdown_text_size)
+        val marginTop = resources.getDimension(R.dimen.countdown_margin_top)
+
+        appendLine("=== DIMENS TEST ===")
+        appendLine("Orientation: ${if (orientation == Configuration.ORIENTATION_LANDSCAPE) "Landscape" else "Portrait"}")
+        appendLine("Text size from XML: ${textSize}px")
+        appendLine("Margin top from XML: ${marginTop}px")
+        appendLine("Actual text size: ${binding.bigCountdownView.textSize}px")
     }
 
     //==============Stage 1 : 2. Prayer Time Calculation Functions ============
@@ -2453,6 +2658,7 @@ class MainActivity : Activity() {
     private fun getNextPrayerAndTime(): Pair<String, String?> {
         // First: check if we're in a grace period
         val currentPrayer = getCurrentPrayerAtTime()
+
         if (currentPrayer != null) {
             // During grace period: "next" prayer is the CURRENT one
             val todayFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
@@ -2506,45 +2712,6 @@ class MainActivity : Activity() {
 //------------------------------------------------------------------
 
     // -----------------------------
-// Helpers used by the functions
-// -----------------------------
-    private fun todayDateString(offsetDays: Int = 0): String {
-        val cal = Calendar.getInstance()
-        if (offsetDays != 0) cal.add(Calendar.DAY_OF_YEAR, offsetDays)
-        val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        fmt.timeZone = TimeZone.getDefault()
-        return fmt.format(cal.time)
-    }
-
-    private fun hmToMinutesSafe(hm: String?): Int? {
-        if (hm == null) return null
-        return try {
-            val parts = hm.trim().split(":")
-            if (parts.size < 2) return null
-            val hh = parts[0].toIntOrNull() ?: return null
-            val mm = parts[1].toIntOrNull() ?: return null
-            hh * 60 + mm
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    // Try to get prayer time for given date string, using method99 -> method12 -> method85 fallbacks
-    private fun getBestPrayerTime(prayer: String, dateStr: String): String? {
-        // method99 preferred
-        method99Map[dateStr]?.let { ps ->
-            getPrayerTimeFromSet(ps, prayer)?.let { return it }
-        }
-        // method12 next
-        method12Map[dateStr]?.let { ps ->
-            getPrayerTimeFromSet(ps, prayer)?.let { return it }
-        }
-        // method85 last
-        method85Map[dateStr]?.let { ps ->
-            getPrayerTimeFromSet(ps, prayer)?.let { return it }
-        }
-        return null
-    }
 
 // -----------------------------
 // getCurrentPrayerName()
@@ -2863,13 +3030,13 @@ class MainActivity : Activity() {
     private fun setupCountdownArea() {
         // Configure bigCountdownView
         binding.bigCountdownView.apply {
-            textSize = 50f
             gravity = Gravity.CENTER
             typeface = Typeface.MONOSPACE
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(Color.YELLOW)
             visibility = View.VISIBLE
-            setPadding(0, 20.dpToPx(), 0, 20.dpToPx())
+            setPadding(0, 2.dpToPx(), 0, 2.dpToPx())
+
         }
 
         // Configure graceTimerView
@@ -2881,30 +3048,10 @@ class MainActivity : Activity() {
             setTextColor(Color.RED)
             setBackgroundColor(Color.parseColor("#30000000"))
             visibility = View.GONE
-            setPadding(0, 30.dpToPx(), 0, 30.dpToPx())
+            setPadding(0, 10.dpToPx(), 0, 10.dpToPx())
         }
     }
 
-    private fun showBigCountdown(seconds: Int, prayer: String) {
-        runOnUiThread {
-
-            val minutes = seconds / 60
-            val remainingSeconds = seconds % 60
-
-            // Format test display with seconds when appropriate
-            val displayText = if (minutes < 10 && seconds >= 60) {
-                "${minutes}m ${remainingSeconds}s\nto Test"
-            } else if (seconds >= 60) {
-                "${minutes}m\nto Test"
-            } else {
-                "${seconds}s\nto Test"
-            }
-
-            binding.bigCountdownView.text = displayText
-            binding.bigCountdownView.setTextColor(getGracePeriodColor(seconds, prayer))
-            binding.bigCountdownView.visibility = View.VISIBLE
-        }
-    }
 
     private fun hideBigCountdown() {
         runOnUiThread {
@@ -2912,37 +3059,10 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun getGracePeriodColor(seconds: Int, prayer: String): Int {
-        val minutes = seconds / 60
-        return when {
-            minutes > 30 -> Color.YELLOW
-            minutes > 10 -> Color.parseColor("#FFA500") // Orange
-            minutes > 1 -> Color.RED
-            else -> Color.RED  // Last minute - urgent
-        }
-    }
-
-    private fun setupTitleLongPress() {
-        val title = binding.rootLayout.getChildAt(0) as? TextView
-        title?.setOnLongClickListener {
-            appendLine("=== LONG PRESS TEST ===")
-
-            // Test 1: Show immediate countdown
-            showBigCountdown(45, "Test")
-
-            // Test 2: Start simple countdown
-            handler.postDelayed({
-                startSimpleCountdown()
-            }, 1000)
-
-            return@setOnLongClickListener true
-        }
-    }
 
     // Modify updateCountdownWithSeconds() to handle the 0 seconds case
     private fun updateCountdownWithSeconds(prayer: String, totalSecondsRemaining: Int) {
         runOnUiThread {
-
             // Don't update if we're in grace period
             if (gracePeriodTimer != null) {
                 return@runOnUiThread
@@ -2969,16 +3089,14 @@ class MainActivity : Activity() {
                 }
             }
 
-            // 🔹 Orientation‑aware formatting
+            // Let XML handle the formatting - just set the text
             val orientation = resources.configuration.orientation
-            if (orientation == Configuration.ORIENTATION_PORTRAIT) {
-                binding.bigCountdownView.textSize = 50f
-                binding.bigCountdownView.text = "$timeLine\n$prayerLine"   // two lines
-                (binding.bigCountdownView.layoutParams as LinearLayout.LayoutParams).weight = 0.2f
+
+            // Set text based on orientation
+            binding.bigCountdownView.text = if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+                "$timeLine\n$prayerLine"
             } else {
-                binding.bigCountdownView.textSize = 25f
-                binding.bigCountdownView.text = "$timeLine $prayerLine"    // one line
-                (binding.bigCountdownView.layoutParams as LinearLayout.LayoutParams).weight = 0.1f
+                "$timeLine $prayerLine"
             }
 
             // 🔹 Color coding
@@ -2990,13 +3108,12 @@ class MainActivity : Activity() {
             }
             binding.bigCountdownView.setTextColor(color)
             binding.bigCountdownView.visibility = View.VISIBLE
-
-            binding.rootLayout.requestLayout() // force layout refresh
         }
     }
 
+
     // StatusBar Priority Management helpers
-    private fun updateStatusBarWithPriority(message: String, priority: Int) {
+    private fun updateStatusBarWithPriority(message: CharSequence, priority: Int) {
         runOnUiThread {
             if (priority >= currentStatusBarPriority) {
                 binding.statusBar.text = message
@@ -3009,7 +3126,7 @@ class MainActivity : Activity() {
         runOnUiThread {
             if (priority >= currentStatusBarPriority) {
                 binding.statusBar.text = ""
-                currentStatusBarPriority = priority
+                currentStatusBarPriority = STATUS_BAR_PRIORITIES.NORMAL
             }
         }
     }
@@ -3187,7 +3304,7 @@ class MainActivity : Activity() {
 
     // --- 2. Nested Foreground Service ---
     // 🔹 Nested Foreground Service
-    // In PrayerTimeCompare.kt
+    // In Prayerzoneslite.kt
     class PrayerNotificationService : Service() {
         private var mediaPlayer: MediaPlayer? = null
 
@@ -3197,7 +3314,7 @@ class MainActivity : Activity() {
                 try {
                     mediaPlayer?.stop()
                 } catch (_: IllegalStateException) {
-                    MainActivity.appendLogEntry("MediaPlayer.stop() called in wrong state")
+                    appendLogEntry("MediaPlayer.stop() called in wrong state")
                 }
                 mediaPlayer?.release()
                 mediaPlayer = null
@@ -3239,40 +3356,32 @@ class MainActivity : Activity() {
                 mediaPlayer?.apply {
                     setOnCompletionListener {
                         sendPlaybackBroadcast(ACTION_PLAYBACK_STOPPED, prayer)
-                        MainActivity.appendLogEntry("Azan finished for $prayer")
+                        appendLogEntry("Azan finished for $prayer")
                         @Suppress("DEPRECATION")
                         stopForeground(true)
                         stopSelf()
                     }
                     setOnErrorListener { _, what, extra ->
                         Log.e("PrayerNotificationService", "MediaPlayer error: what=$what, extra=$extra")
-                        MainActivity.appendLogEntry("Azan error: what=$what extra=$extra")
+                        appendLogEntry("Azan error: what=$what extra=$extra")
                         sendPlaybackBroadcast(ACTION_PLAYBACK_STOPPED, prayer)
                         stopSelf()
                         true
                     }
                     start()
-                    MainActivity.appendLogEntry("Azan started for $prayer")
+                    appendLogEntry("Azan started for $prayer")
                 }
             } catch (e: Exception) {
                 Log.e("PrayerNotificationService", "Error playing azan for $prayer", e)
-                MainActivity.appendLogEntry("Error playing azan: ${e.message}")
+                appendLogEntry("Error playing azan: ${e.message}")
                 sendPlaybackBroadcast(ACTION_PLAYBACK_STOPPED, prayer)
                 stopSelf()
             }
         }
 
-        // This function was removed in your code, re-add it.
-        private fun broadcastPlaybackState(action: String, prayer: String) {
-            val intent = Intent(action).apply {
-                setPackage(packageName)
-                putExtra("prayer", prayer)
-            }
-            sendBroadcast(intent)
-        }
 
         private fun createNotification(prayer: String): Notification {
-            val stopIntent = Intent(this, MainActivity.PrayerNotificationService::class.java).apply {
+            val stopIntent = Intent(this, PrayerNotificationService::class.java).apply {
                 action = "STOP_AZAN"
                 putExtra("prayer", prayer)
             }
@@ -3284,7 +3393,7 @@ class MainActivity : Activity() {
             )
 
             // Heads-up reliability: fullScreenIntent (alarm-style peek)
-            val fsIntent = Intent(this, MainActivity::class.java).apply {
+            val fsIntent = Intent(this, this::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 putExtra("from_azan", true)
                 putExtra("prayer", prayer)
@@ -3483,21 +3592,5 @@ class MainActivity : Activity() {
 
         return calendar.timeInMillis
     }
-
-    //landscape and portrait formatting
-    private fun updateCountdownFormatting(timeText: String, prayerName: String) {
-        val orientation = resources.configuration.orientation
-        if (orientation == Configuration.ORIENTATION_PORTRAIT) {
-            binding.bigCountdownView.textSize = 50f
-            binding.bigCountdownView.text = "$timeText\nto $prayerName"
-            (binding.bigCountdownView.layoutParams as LinearLayout.LayoutParams).weight = 0.2f
-        } else {
-            binding.bigCountdownView.textSize = 25f
-            binding.bigCountdownView.text = "$timeText to $prayerName"
-            (binding.bigCountdownView.layoutParams as LinearLayout.LayoutParams).weight = 0.1f
-        }
-        binding.rootLayout.requestLayout()
-    }
-
 
 }

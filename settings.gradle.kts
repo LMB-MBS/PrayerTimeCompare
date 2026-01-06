@@ -19,6 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PrayerTimeCompare"
+rootProject.name = "PrayerZonesLite"
 include(":app")
  

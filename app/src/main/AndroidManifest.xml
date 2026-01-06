@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.abang.prayertimecompare">
+    package="com.abang.prayerzoneslite">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
@@ -19,11 +19,11 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:resizeableActivity="true"
-        android:theme="@style/Theme.PrayerTimeCompare">
+        android:theme="@style/Theme.PrayerZonesLite">
 
 
         <activity
-            android:name=".MainActivity"
+            android:name=".PrayerZonesLite"
             android:screenOrientation="fullSensor"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:exported="true">

@@ -82,10 +82,6 @@ import android.widget.FrameLayout
 
 import androidx.core.content.ContextCompat
 import com.abang.prayertimecompare.databinding.ActivityMainBinding
-import kotlin.apply
-import kotlin.text.get
-import kotlin.text.set
-import kotlin.text.toInt
 
 
 
@@ -131,13 +127,10 @@ private enum class Method12Format {
     MONTH_KEYED, DATE_KEYED
 }
 
-private data class ParseResult<T>(val data: T, val errors: List<String> = emptyList())
 
 object Colors {
     val BG = Color.BLACK
-    val TITLE_BG = Color.DKGRAY
     val TITLE_TEXT = Color.WHITE
-    val TAB_ACTIVE = Color.parseColor("#00BCD4")
     val TAB_INACTIVE = Color.GRAY
     val LOG_TEXT = Color.LTGRAY
     val GREEN = Color.parseColor("#00AA00")
@@ -285,7 +278,6 @@ class PlaybackService : Service() {
 // Map now stores label, icon view, and icon container
 private val prayerTabs = mutableMapOf<String, Triple<TextView, ImageView, LinearLayout>>()
 
-private var isPlaying: Boolean = false
 
 private lateinit var binding: ActivityMainBinding
 
@@ -356,10 +348,8 @@ class MainActivity : Activity() {
     private val STATUS_BAR_PRIORITIES = object {
         val NORMAL = 0          // Default/clear
         val PRAYER_COUNTDOWN = 1  // Lowest - redundant with big display
-        val AUTO_SWITCH = 2      // "Auto-switched to..."
         val GRACE_PERIOD = 3     // "Switching to... in Xs" (HIGH)
         val MANUAL_OVERRIDE = 4  // "Returning to auto-mode..." (HIGHEST)
-        val ERROR = 5           // Error messages
     }
 
     // 🔹 Companion object: shared log buffer + static logging
@@ -397,7 +387,6 @@ class MainActivity : Activity() {
     }
     private lateinit var graceTimerView: TextView
 
-    private var currentGracePeriodMinutes = 1 // Start with 1 min for testing
     private var isBlinkingActive = false
     private var blinkState = false
     private val blinkHandler = Handler(Looper.getMainLooper())
@@ -416,15 +405,8 @@ class MainActivity : Activity() {
     private var currentPlayingPrayer: String? = null
     private var returnCountdownHandler: Handler? = null
     private var returnCountdownTask: Runnable? = null
-    private var gracePeriodMinutes = 1 // Configurable for Stage 2
     private var isAutoMode = true
     private var currentOverridePrayer: String? = null
-    private var prayerHighlightHandler = Handler(Looper.getMainLooper())
-    private val prayerHighlightTask = object : Runnable {
-        override fun run() {
-            prayerHighlightHandler.postDelayed(this, 30000) // Check every 30 seconds
-        }
-    }
 
     private lateinit var workingBase: File
     private lateinit var backupRoot: File
@@ -439,8 +421,6 @@ class MainActivity : Activity() {
     private val coeffsMap: MutableMap<String, DoubleArray> = mutableMapOf() // prayer -> coeffs
     private val m85Predictions: MutableMap<String, Map<String, String>> = mutableMapOf() // prayer -> (date->time)
 
-    private var hasErrors = false
-    private val errorMessages = StringBuilder()
     // Add a debug mode flag (you could make this configurable)
     private var DEBUG_MODE = false
     private var debugTapCount = 0
@@ -503,7 +483,6 @@ class MainActivity : Activity() {
     // -----------------------------------------------------
     private var sourceM12: String = "ERROR"   // CACHE / INTERNET / ERROR
     private var sourceM99: String = "ERROR"
-    private val sourceAPI = mutableMapOf<Int, String>() // for method 00–12
 
     private var activePrayer: String? = null
 
@@ -512,7 +491,6 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val isRestoring = savedInstanceState != null
 
         // --- Edge-to-edge display setup --- (important for modern UI)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -673,10 +651,10 @@ class MainActivity : Activity() {
     }
 
     private fun renderTableFromBuffer() {
-    resolvePrayer()?.let { prayer ->
-        showPrayer(prayer)          // safe render when prayer is known
-    } ?: showLoadingPlaceholder()   // neutral fallback if still null
-}
+        resolvePrayer()?.let { prayer ->
+            showPrayer(prayer)          // safe render when prayer is known
+        } ?: showLoadingPlaceholder()   // neutral fallback if still null
+    }
 
 
 
@@ -767,7 +745,7 @@ class MainActivity : Activity() {
             } else {
                 binding.statusBar.text = "Tap red speaker to stop Azan & disable it"
             }
-            }
+        }
 
         // Optional playback/notification trigger
         if (triggerPlayback && remainingSeconds == null) {
@@ -854,8 +832,6 @@ class MainActivity : Activity() {
         runOnUiThread {
             // Find the current prayer time cell in the table and blink it
             // This is a simplified implementation - we need to find the specific TextView
-            val dateFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-            val todayStr = dateFmt.format(Date())
 
             // We'll blink the status bar as a simple visual indicator for now
             // In next stage, we'll implement proper table cell blinking
@@ -915,27 +891,6 @@ class MainActivity : Activity() {
         appendLine("Grace period for $endedPrayer ended, switched to $activePrayer")
     }
 
-    private fun debugLayoutStructure() {
-        runOnUiThread {
-            appendLine("=== LAYOUT STRUCTURE ===")
-            appendLine("Root layout has ${binding.rootLayout.childCount} children:")
-
-            for (i in 0 until binding.rootLayout.childCount) {
-                val child = binding.rootLayout.getChildAt(i)
-                val visibility = if (child.visibility == View.VISIBLE) "VISIBLE"
-                else if (child.visibility == View.GONE) "GONE"
-                else "INVISIBLE"
-
-                appendLine("  [$i] ${child.javaClass.simpleName} - $visibility")
-
-                if (child == binding.bigCountdownView) {
-                    appendLine("     ^ THIS IS THE COUNTDOWN VIEW")
-                    appendLine("     Text: ${(child as TextView).text}")
-                    appendLine("     Height: ${child.height}")
-                }
-            }
-        }
-    }
 
     private fun debugRotationState() {
         appendLine("=== ROTATION DEBUG ===")
@@ -946,43 +901,11 @@ class MainActivity : Activity() {
         appendLine("contentTable child count: ${binding.contentTable.childCount}")
     }
     // Add this method for testing
-    private fun testCountdownNow() {
-        appendLine("=== MANUAL COUNTDOWN TEST ===")
-
-        // Test 1: Show countdown immediately
-        showBigCountdown(45, "Fajr")
-        debugLayoutStructure()
-
-        // Test 2: Start grace period
-        handler.postDelayed({
-            appendLine("Starting grace period in 3 seconds...")
-            startOrResotreGracePeriod("Dhuhr")
-        }, 3000)
-    }
 
     // -------------------------------
     // UI helpers
     // -------------------------------
 
-    private fun applyCountdownDimens() {
-        val sizePx = resources.getDimension(R.dimen.countdown_text_size)
-        binding.bigCountdownView.setTextSize(TypedValue.COMPLEX_UNIT_PX, sizePx)
-
-        val topMargin = resources.getDimensionPixelSize(R.dimen.countdown_margin_top)
-        val bottomMargin = resources.getDimensionPixelSize(R.dimen.countdown_margin_bottom)
-        (binding.bigCountdownView.layoutParams as ViewGroup.MarginLayoutParams).apply {
-            this.topMargin = topMargin
-            this.bottomMargin = bottomMargin
-        }
-        binding.bigCountdownView.requestLayout()
-    }
-
-    private fun maybeExpireManualMode() {
-        if (manualModeActive && System.currentTimeMillis() >= manualModeEndTime) {
-            manualModeActive = false
-            updateTabStyles()
-        }
-    }
     private fun buildTabs() {
         binding.topTabs.removeAllViews()
         binding.topTabs.orientation = LinearLayout.VERTICAL
@@ -1194,70 +1117,70 @@ class MainActivity : Activity() {
 
 
     private fun startReturnCountdown() {
-    // Cancel any existing countdown first
-    cancelReturnCountdown()
+        // Cancel any existing countdown first
+        cancelReturnCountdown()
 
-    appendLine("Starting 20-second return countdown...")
+        appendLine("Starting 20-second return countdown...")
 
-    // Mark manual override
-    isAutoMode = false
-    currentOverridePrayer = activePrayer
-    userOverrideExpiry = System.currentTimeMillis() + 20_000L
+        // Mark manual override
+        isAutoMode = false
+        currentOverridePrayer = activePrayer
+        userOverrideExpiry = System.currentTimeMillis() + 20_000L
 
-    // Also set manual mode flags
-    manualModeActive = true
-    manualModeEndTime = userOverrideExpiry
+        // Also set manual mode flags
+        manualModeActive = true
+        manualModeEndTime = userOverrideExpiry
 
-    // Ensure readable status bar styling
-    binding.statusBar.setBackgroundColor(Color.DKGRAY)
-    binding.statusBar.setTextColor(Color.WHITE)
+        // Ensure readable status bar styling
+        binding.statusBar.setBackgroundColor(Color.DKGRAY)
+        binding.statusBar.setTextColor(Color.WHITE)
 
-    returnCountdownHandler = Handler(Looper.getMainLooper())
-    returnCountdownTask = object : Runnable {
-        override fun run() {
-            // Stop if override was cleared elsewhere
-            if (currentOverridePrayer == null || isAutoMode) {
-                clearStatusBarIfLowerPriority(STATUS_BAR_PRIORITIES.NORMAL)
-                return
-            }
+        returnCountdownHandler = Handler(Looper.getMainLooper())
+        returnCountdownTask = object : Runnable {
+            override fun run() {
+                // Stop if override was cleared elsewhere
+                if (currentOverridePrayer == null || isAutoMode) {
+                    clearStatusBarIfLowerPriority(STATUS_BAR_PRIORITIES.NORMAL)
+                    return
+                }
 
-            val remaining = ((userOverrideExpiry - System.currentTimeMillis()) / 1000L).coerceAtLeast(0)
+                val remaining = ((userOverrideExpiry - System.currentTimeMillis()) / 1000L).coerceAtLeast(0)
 
-            if (remaining > 0) {
-                // Visible countdown message
-                updateStatusBarWithPriority(
-                    "Returning to auto-mode in ${remaining}s",
-                    STATUS_BAR_PRIORITIES.MANUAL_OVERRIDE
-                )
-                binding.statusBar.setTextColor(Color.WHITE)
-                binding.statusBar.setBackgroundColor(Color.DKGRAY)
+                if (remaining > 0) {
+                    // Visible countdown message
+                    updateStatusBarWithPriority(
+                        "Returning to auto-mode in ${remaining}s",
+                        STATUS_BAR_PRIORITIES.MANUAL_OVERRIDE
+                    )
+                    binding.statusBar.setTextColor(Color.WHITE)
+                    binding.statusBar.setBackgroundColor(Color.DKGRAY)
 
-                // Continue countdown
-                returnCountdownHandler?.postDelayed(this, 1000L)
-            } else {
-                appendLine("Return countdown finished; switching back to auto-mode.")
+                    // Continue countdown
+                    returnCountdownHandler?.postDelayed(this, 1000L)
+                } else {
+                    appendLine("Return countdown finished; switching back to auto-mode.")
 
-                // Reset flags
-                isAutoMode = true
-                manualModeActive = false
-                manualModeEndTime = 0L
-                currentOverridePrayer = null
+                    // Reset flags
+                    isAutoMode = true
+                    manualModeActive = false
+                    manualModeEndTime = 0L
+                    currentOverridePrayer = null
 
-                // Return to auto-mode prayer
-                returnToCurrentPrayer()
+                    // Return to auto-mode prayer
+                    returnToCurrentPrayer()
 
-                // Recompute tab styles immediately
-                updateTabStyles()
+                    // Recompute tab styles immediately
+                    updateTabStyles()
 
-                // Clear status bar
-                clearStatusBarIfLowerPriority(STATUS_BAR_PRIORITIES.NORMAL)
+                    // Clear status bar
+                    clearStatusBarIfLowerPriority(STATUS_BAR_PRIORITIES.NORMAL)
+                }
             }
         }
-    }
 
-    // Start countdown immediately
-    returnCountdownHandler?.post(returnCountdownTask!!)
-}
+        // Start countdown immediately
+        returnCountdownHandler?.post(returnCountdownTask!!)
+    }
 
     private fun cancelReturnCountdown() {
         appendLine("Cancelling return countdown...")
@@ -1630,29 +1553,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun updateCountdownViewForOrientation() {
-        val orientation = resources.configuration.orientation
-
-        // Update layout params if needed
-        val params = binding.bigCountdownView.layoutParams as? FrameLayout.LayoutParams
-        params?.let {
-            if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-                it.width = FrameLayout.LayoutParams.MATCH_PARENT
-                binding.bigCountdownView.maxLines = 1
-            } else {
-                it.width = FrameLayout.LayoutParams.WRAP_CONTENT
-                binding.bigCountdownView.maxLines = 2
-            }
-            binding.bigCountdownView.layoutParams = it
-        }
-
-        // Request layout refresh
-        binding.bigCountdownView.requestLayout()
-    }
-
-
-
-
     // -------------------------------
     // Directories & backup
     // -------------------------------
@@ -1930,7 +1830,6 @@ class MainActivity : Activity() {
             if (coeffs != null && coeffs.isNotEmpty()) {
                 appendLine("Computing M85 predictions for $p using coefficients...")
                 val out = TreeMap<String, String>()
-                val prayerSetMap = TreeMap<String, PrayerSet>() // NEW: Build PrayerSet objects
 
                 for ((date, pset) in method12Map) {
                     val base = getPrayerTimeFromSet(pset, p)
@@ -2383,6 +2282,12 @@ class MainActivity : Activity() {
     }
 
     private fun findActualNextPrayerDate(nextPrayer: String, nextPrayerTime: String?, dates: List<Date>): Date {
+        // 🔹 FIX: During grace period, force selection of Today (first date)
+        // This prevents the loop from skipping Today because the time is technically in the past
+        if (dates.isNotEmpty() && nextPrayer == currentGracePrayer) {
+            return dates[0]
+        }
+
         val dateFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val now = Calendar.getInstance()
 
@@ -2713,6 +2618,7 @@ class MainActivity : Activity() {
     private fun getNextPrayerAndTime(): Pair<String, String?> {
         // First: check if we're in a grace period
         val currentPrayer = getCurrentPrayerAtTime()
+
         if (currentPrayer != null) {
             // During grace period: "next" prayer is the CURRENT one
             val todayFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
@@ -2766,45 +2672,6 @@ class MainActivity : Activity() {
 //------------------------------------------------------------------
 
     // -----------------------------
-// Helpers used by the functions
-// -----------------------------
-    private fun todayDateString(offsetDays: Int = 0): String {
-        val cal = Calendar.getInstance()
-        if (offsetDays != 0) cal.add(Calendar.DAY_OF_YEAR, offsetDays)
-        val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        fmt.timeZone = TimeZone.getDefault()
-        return fmt.format(cal.time)
-    }
-
-    private fun hmToMinutesSafe(hm: String?): Int? {
-        if (hm == null) return null
-        return try {
-            val parts = hm.trim().split(":")
-            if (parts.size < 2) return null
-            val hh = parts[0].toIntOrNull() ?: return null
-            val mm = parts[1].toIntOrNull() ?: return null
-            hh * 60 + mm
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    // Try to get prayer time for given date string, using method99 -> method12 -> method85 fallbacks
-    private fun getBestPrayerTime(prayer: String, dateStr: String): String? {
-        // method99 preferred
-        method99Map[dateStr]?.let { ps ->
-            getPrayerTimeFromSet(ps, prayer)?.let { return it }
-        }
-        // method12 next
-        method12Map[dateStr]?.let { ps ->
-            getPrayerTimeFromSet(ps, prayer)?.let { return it }
-        }
-        // method85 last
-        method85Map[dateStr]?.let { ps ->
-            getPrayerTimeFromSet(ps, prayer)?.let { return it }
-        }
-        return null
-    }
 
 // -----------------------------
 // getCurrentPrayerName()
@@ -3145,26 +3012,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showBigCountdown(seconds: Int, prayer: String) {
-        runOnUiThread {
-
-            val minutes = seconds / 60
-            val remainingSeconds = seconds % 60
-
-            // Format test display with seconds when appropriate
-            val displayText = if (minutes < 10 && seconds >= 60) {
-                "${minutes}m ${remainingSeconds}s\nto Test"
-            } else if (seconds >= 60) {
-                "${minutes}m\nto Test"
-            } else {
-                "${seconds}s\nto Test"
-            }
-
-            binding.bigCountdownView.text = displayText
-            binding.bigCountdownView.setTextColor(getGracePeriodColor(seconds, prayer))
-            binding.bigCountdownView.visibility = View.VISIBLE
-        }
-    }
 
     private fun hideBigCountdown() {
         runOnUiThread {
@@ -3172,15 +3019,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun getGracePeriodColor(seconds: Int, prayer: String): Int {
-        val minutes = seconds / 60
-        return when {
-            minutes > 30 -> Color.YELLOW
-            minutes > 10 -> Color.parseColor("#FFA500") // Orange
-            minutes > 1 -> Color.RED
-            else -> Color.RED  // Last minute - urgent
-        }
-    }
 
     // Modify updateCountdownWithSeconds() to handle the 0 seconds case
     private fun updateCountdownWithSeconds(prayer: String, totalSecondsRemaining: Int) {
@@ -3233,19 +3071,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun updateCountdownText(prayer: String, orientation: Int) {
-        if (orientation == Configuration.ORIENTATION_PORTRAIT) {
-            binding.bigCountdownView.isSingleLine = false
-            binding.bigCountdownView.text = "🕌\n$prayer TIME"
-        } else {
-            binding.bigCountdownView.isSingleLine = true
-            binding.bigCountdownView.text = "🕌 $prayer TIME"
-        }
-
-        // enforce alignment every time
-        binding.bigCountdownView.textAlignment = View.TEXT_ALIGNMENT_CENTER
-        binding.bigCountdownView.gravity = Gravity.CENTER
-    }
 
     // StatusBar Priority Management helpers
     private fun updateStatusBarWithPriority(message: CharSequence, priority: Int) {
@@ -3514,14 +3339,6 @@ class MainActivity : Activity() {
             }
         }
 
-        // This function was removed in your code, re-add it.
-        private fun broadcastPlaybackState(action: String, prayer: String) {
-            val intent = Intent(action).apply {
-                setPackage(packageName)
-                putExtra("prayer", prayer)
-            }
-            sendBroadcast(intent)
-        }
 
         private fun createNotification(prayer: String): Notification {
             val stopIntent = Intent(this, MainActivity.PrayerNotificationService::class.java).apply {
@@ -3735,8 +3552,5 @@ class MainActivity : Activity() {
 
         return calendar.timeInMillis
     }
-
-
-
 
 }
